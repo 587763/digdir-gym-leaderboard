@@ -10,7 +10,6 @@
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
-  <!-- Hand-drawn SVG filters, referenced by avatars and the title underline -->
   <svg width="0" height="0" style="position:absolute" aria-hidden="true">
     <defs>
       <filter id="roughen">
@@ -36,8 +35,12 @@
     </header>
 
     <div class="controls">
-      <button id="manageAthletesBtn" class="btn btn-primary edit-only">👥 Manage Athletes</button>
-      <button id="exportBtn" class="btn btn-secondary">⬇ Backup</button>
+      <button id="myAthleteBtn"     class="btn btn-primary own-only">🏋️ My PRs</button>
+      <button id="claimBtn"         class="btn btn-primary claim-only">🙋 Claim your spot</button>
+      <button id="reviewBtn"        class="btn btn-secondary review-only">📋 Review <span id="reviewCount" class="count-badge" hidden>0</span></button>
+      <button id="adminBtn"         class="btn btn-secondary admin-only">🛡️ Admin</button>
+      <button id="manageAthletesBtn" class="btn btn-secondary admin-only">👥 Athletes</button>
+      <button id="exportBtn"        class="btn btn-ghost">⬇ Backup</button>
     </div>
 
     <div class="tab-navigation">
@@ -46,10 +49,10 @@
       <button class="tab-btn" data-tab="fun">🏆 Hall of Fame</button>
     </div>
 
-    <!-- Add / Edit modal -->
+    <!-- Admin: direct add/edit athlete -->
     <div id="athleteModal" class="modal">
       <div class="modal-content">
-        <span class="close">&times;</span>
+        <span class="close" data-close="athleteModal">&times;</span>
         <h2 id="modalTitle">Add athlete</h2>
         <form id="athleteForm">
           <div class="form-body">
@@ -59,95 +62,137 @@
                 <input type="text" id="athleteName" required autocomplete="off">
               </div>
               <div class="form-row">
-                <div class="form-group">
-                  <label for="squat">🦵 Squat (kg)</label>
-                  <input type="number" id="squat" step="0.5" min="0" value="0">
-                </div>
-                <div class="form-group">
-                  <label for="bench">🏋️ Bench (kg)</label>
-                  <input type="number" id="bench" step="0.5" min="0" value="0">
-                </div>
-                <div class="form-group">
-                  <label for="deadlift">💀 Deadlift (kg)</label>
-                  <input type="number" id="deadlift" step="0.5" min="0" value="0">
-                </div>
+                <div class="form-group"><label for="squat">🦵 Squat (kg)</label><input type="number" id="squat" step="0.5" min="0" value="0"></div>
+                <div class="form-group"><label for="bench">🏋️ Bench (kg)</label><input type="number" id="bench" step="0.5" min="0" value="0"></div>
+                <div class="form-group"><label for="deadlift">💀 Deadlift (kg)</label><input type="number" id="deadlift" step="0.5" min="0" value="0"></div>
               </div>
               <h3 class="form-section-title">🏅 Achievements</h3>
               <div id="achievementFields" class="achievement-fields"></div>
             </div>
             <div class="avatar-preview-container">
               <div id="avatarPreview" class="avatar-preview"></div>
-              <p class="avatar-note">Your figure is drawn from your name.</p>
+              <p class="avatar-note">Drawn from the name.</p>
             </div>
           </div>
           <div class="form-actions">
             <button type="submit" class="btn btn-primary">Save</button>
-            <button type="button" class="btn btn-secondary" id="cancelBtn">Cancel</button>
+            <button type="button" class="btn btn-secondary" data-close="athleteModal">Cancel</button>
           </div>
         </form>
       </div>
     </div>
 
-    <!-- Manage modal -->
+    <!-- Admin: manage athletes list -->
     <div id="manageModal" class="modal">
       <div class="modal-content modal-large">
-        <span class="close-manage">&times;</span>
+        <span class="close" data-close="manageModal">&times;</span>
         <h2>Manage Athletes</h2>
         <button id="addNewAthleteBtn" class="btn btn-primary" style="margin-bottom:20px;">+ Add New Athlete</button>
         <div id="athletesList" class="athletes-list"></div>
       </div>
     </div>
 
-    <!-- Main lifts -->
+    <!-- Claim your spot -->
+    <div id="claimModal" class="modal">
+      <div class="modal-content">
+        <span class="close" data-close="claimModal">&times;</span>
+        <h2>🙋 Claim your spot</h2>
+        <p class="modal-intro">Link your GitHub account to your athlete. An admin approves it, then you can submit your PRs.</p>
+        <div class="form-group">
+          <label for="claimSelect">I am this athlete</label>
+          <select id="claimSelect" class="claim-select"></select>
+        </div>
+        <div class="form-divider-or">— or —</div>
+        <div class="form-group">
+          <label for="claimNewName">Add me as a new athlete</label>
+          <input type="text" id="claimNewName" placeholder="Your name" autocomplete="off">
+        </div>
+        <div class="form-actions">
+          <button id="claimSubmit" class="btn btn-primary">Request</button>
+          <button class="btn btn-secondary" data-close="claimModal">Cancel</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- My athlete: propose changes -->
+    <div id="mineModal" class="modal">
+      <div class="modal-content">
+        <span class="close" data-close="mineModal">&times;</span>
+        <h2>🏋️ My PRs</h2>
+        <p class="modal-intro">PRs &amp; achievements need a peer to verify. Name changes need an admin. Unchanged fields are ignored.</p>
+        <form id="mineForm">
+          <div class="form-group">
+            <label for="mineName">Name <span class="tag tag-admin">admin approval</span></label>
+            <input type="text" id="mineName" autocomplete="off">
+          </div>
+          <div class="form-row">
+            <div class="form-group"><label for="mineSquat">🦵 Squat <span class="tag tag-peer">peer verify</span></label><input type="number" id="mineSquat" step="0.5" min="0"></div>
+            <div class="form-group"><label for="mineBench">🏋️ Bench <span class="tag tag-peer">peer verify</span></label><input type="number" id="mineBench" step="0.5" min="0"></div>
+            <div class="form-group"><label for="mineDeadlift">💀 Deadlift <span class="tag tag-peer">peer verify</span></label><input type="number" id="mineDeadlift" step="0.5" min="0"></div>
+          </div>
+          <h3 class="form-section-title">🏅 Achievements <span class="tag tag-peer">peer verify</span></h3>
+          <div id="mineAchievementFields" class="achievement-fields"></div>
+          <div class="form-actions">
+            <button type="submit" class="btn btn-primary">Submit changes</button>
+            <button type="button" class="btn btn-secondary" data-close="mineModal">Cancel</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <!-- Review queue -->
+    <div id="reviewModal" class="modal">
+      <div class="modal-content modal-large">
+        <span class="close" data-close="reviewModal">&times;</span>
+        <h2>📋 Pending changes</h2>
+        <p class="modal-intro">Verify peers' PRs &amp; achievements; admins also approve name changes, new athletes, and claims. You can't decide your own.</p>
+        <div id="reviewList" class="review-list"></div>
+      </div>
+    </div>
+
+    <!-- Admin: users -->
+    <div id="adminModal" class="modal">
+      <div class="modal-content modal-large">
+        <span class="close" data-close="adminModal">&times;</span>
+        <h2>🛡️ Members</h2>
+        <p class="modal-intro">Approve, link to an athlete, or grant admin.</p>
+        <div id="usersList" class="users-list"></div>
+      </div>
+    </div>
+
+    <!-- Leaderboards -->
     <div class="tab-content active" id="lifts-tab">
       <div class="leaderboards">
         <div class="leaderboard-section" data-lift="squat">
           <h2 class="lift-header" data-lift="squat">🦵 Squat</h2>
-          <table class="leaderboard-table" id="squatTable">
-            <thead><tr><th>Rank</th><th>Name</th><th>PR (kg)</th></tr></thead>
-            <tbody></tbody>
-          </table>
+          <table class="leaderboard-table" id="squatTable"><thead><tr><th>Rank</th><th>Name</th><th>PR (kg)</th></tr></thead><tbody></tbody></table>
         </div>
         <div class="leaderboard-section focused" data-lift="bench">
           <h2 class="lift-header" data-lift="bench">🏋️ Bench Press</h2>
-          <table class="leaderboard-table" id="benchTable">
-            <thead><tr><th>Rank</th><th>Name</th><th>PR (kg)</th></tr></thead>
-            <tbody></tbody>
-          </table>
+          <table class="leaderboard-table" id="benchTable"><thead><tr><th>Rank</th><th>Name</th><th>PR (kg)</th></tr></thead><tbody></tbody></table>
         </div>
         <div class="leaderboard-section" data-lift="deadlift">
           <h2 class="lift-header" data-lift="deadlift">💀 Deadlift</h2>
-          <table class="leaderboard-table" id="deadliftTable">
-            <thead><tr><th>Rank</th><th>Name</th><th>PR (kg)</th></tr></thead>
-            <tbody></tbody>
-          </table>
+          <table class="leaderboard-table" id="deadliftTable"><thead><tr><th>Rank</th><th>Name</th><th>PR (kg)</th></tr></thead><tbody></tbody></table>
         </div>
       </div>
       <p class="hint">Tap a lift's title to spotlight it with a podium.</p>
     </div>
 
-    <!-- Total -->
     <div class="tab-content" id="total-tab">
       <div class="leaderboards">
         <div class="leaderboard-section leaderboard-total focused" data-lift="total">
           <h2>🏆 Total (Combined)</h2>
-          <table class="leaderboard-table" id="totalTable">
-            <thead><tr><th>Rank</th><th>Name</th><th>Total (kg)</th></tr></thead>
-            <tbody></tbody>
-          </table>
+          <table class="leaderboard-table" id="totalTable"><thead><tr><th>Rank</th><th>Name</th><th>Total (kg)</th></tr></thead><tbody></tbody></table>
         </div>
       </div>
     </div>
 
-    <!-- Hall of Fame -->
     <div class="tab-content" id="fun-tab">
       <div id="hallOfFame" class="fun-lifts-container"></div>
     </div>
   </div>
 
-  <!-- Pinned + SRI so a tampered/compromised CDN can't inject code. To upgrade:
-       bump the version, recompute the hash from the SAME /dist/umd/supabase.js URL
-       (curl -sL <url> | openssl dgst -sha384 -binary | openssl base64 -A), update both. -->
   <script
     src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.107.0/dist/umd/supabase.js"
     integrity="sha384-CQbEv3UOeYwlaBLdPF5KqEagCP39Q1KpvJC6Gwa3UGjZAwMvpA+0TFxSSnrgb4MX"

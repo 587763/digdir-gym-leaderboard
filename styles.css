@@ -91,10 +91,51 @@ header { margin-bottom: 28px; }
 
 .controls { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 22px; }
 
-/* Anything edit-only is hidden until the user is a verified editor */
-.edit-only { display: none; }
-body.can-edit .edit-only { display: inline-flex; }
+/* Role-gated controls: hidden by default, shown when the body has the matching class */
+.own-only, .claim-only, .review-only, .admin-only { display: none; }
+body.is-active  .own-only    { display: inline-flex; }
+body.can-claim  .claim-only  { display: inline-flex; }
+body.can-review .review-only { display: inline-flex; }
+body.is-admin   .admin-only  { display: inline-flex; }
 .auth-user.view-only { color: var(--ink-soft); border-style: dashed; }
+
+.count-badge {
+  background: var(--marker-red); color: #fff; border-radius: 999px;
+  padding: 0 7px; margin-left: 4px; font-size: 0.95rem; font-weight: 700;
+}
+
+/* approval-type tags */
+.tag { font-family: 'Indie Flower', cursive; font-size: 0.85rem; padding: 1px 8px; border-radius: 999px; vertical-align: middle; }
+.tag-peer  { background: #dbeafe; color: #1e40af; }
+.tag-admin { background: #fef3c7; color: #92400e; }
+
+.modal-intro { color: var(--ink-soft); font-size: 1.1rem; margin-bottom: 16px; }
+.form-divider-or { text-align: center; color: var(--ink-soft); font-family: 'Indie Flower', cursive; margin: 10px 0; }
+.claim-select, .user-controls select {
+  width: 100%; font-family: 'Caveat', cursive; font-size: 1.2rem;
+  padding: 8px 12px; border: 2px solid var(--line); border-radius: 10px; background: #fff;
+}
+.badge-chip.pending { filter: grayscale(0.2); opacity: 0.8; }
+
+/* review queue */
+.review-list, .users-list { display: flex; flex-direction: column; gap: 10px; max-height: 62vh; overflow-y: auto; }
+.review-row, .user-row {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  background: var(--panel); border: 2px solid var(--line); border-radius: 12px; padding: 10px 14px; flex-wrap: wrap;
+}
+.review-desc { font-size: 1.2rem; }
+.review-desc .by { color: var(--ink-soft); font-size: 1rem; }
+.review-actions, .user-controls { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.user-controls select { width: auto; min-width: 150px; }
+
+/* members list */
+.user-info { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 1.2rem; }
+.status-chip { font-family: 'Indie Flower', cursive; font-size: 0.9rem; padding: 1px 8px; border-radius: 999px; }
+.status-pending { background: #fef3c7; color: #92400e; }
+.status-active  { background: #dcfce7; color: #166534; }
+.status-blocked { background: #fee2e2; color: #991b1b; }
+.status-admin   { background: #ede9fe; color: #5b21b6; }
+.linked-to { color: var(--ink-soft); font-size: 1rem; margin-left: 6px; }
 
 /* ---- tabs ----------------------------------------------------------------- */
 .tab-navigation { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 24px; border-bottom: 3px dashed var(--line); padding-bottom: 8px; }

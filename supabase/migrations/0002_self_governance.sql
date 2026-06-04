@@ -1,40 +1,22 @@
--- Digdir Gym Leaderboard — full database schema (fresh install).
--- Paste into Supabase → SQL Editor → Run. Recreates everything from scratch.
--- For an EXISTING database, use the incremental files in supabase/migrations/ instead.
+-- Self-governance model: admins, self-claim, peer-verified PRs/achievements.
+-- Replaces the GitHub-org gating from 0001. Apply to the live DB by pasting into
+-- Supabase → SQL Editor → Run. Does NOT touch existing athlete rows.
 --
--- Governance model: GitHub login for identity; an admin (bootstrapped below) approves
--- people and links each to one athlete; PR/achievement changes are peer-verified;
--- name changes / new athletes are admin-approved. Enforced by RLS + functions.
+-- Bootstrap admin: the GitHub login below is made admin automatically (on signup
+-- and via the backfill at the bottom). Change it if needed.
 
 -- ───────────────────────────────────────────────────────────────────────────
--- Athletes (the board)
+-- 0. Tear down the org-gating from migration 0001
 -- ───────────────────────────────────────────────────────────────────────────
-drop table if exists public.proposals cascade;
-drop table if exists public.profiles cascade;
-drop table if exists public.athletes cascade;
-
-create table public.athletes (
-  id           uuid primary key default gen_random_uuid(),
-  name         text not null,
-  bench        numeric(6,1) not null default 0 check (bench    >= 0),
-  squat        numeric(6,1) not null default 0 check (squat    >= 0),
-  deadlift     numeric(6,1) not null default 0 check (deadlift >= 0),
-  achievements text[] not null default '{}',
-  avatar       jsonb not null default '{}'::jsonb,   -- reserved (future avatar customizer)
-  created_at   timestamptz not null default now(),
-  updated_at   timestamptz not null default now()
-);
-
-create or replace function public.touch_updated_at()
-returns trigger language plpgsql as $$
-begin new.updated_at = now(); return new; end; $$;
-create trigger athletes_touch_updated_at
-  before update on public.athletes for each row execute function public.touch_updated_at();
+drop policy if exists "Editors can insert" on public.athletes;
+drop policy if exists "Editors can update" on public.athletes;
+drop policy if exists "Editors can delete" on public.athletes;
+drop table if exists public.editors cascade;
 
 -- ───────────────────────────────────────────────────────────────────────────
--- Profiles (one per GitHub user) + signup trigger / admin bootstrap
+-- 1. Profiles — one per signed-in GitHub user
 -- ───────────────────────────────────────────────────────────────────────────
-create table public.profiles (
+create table if not exists public.profiles (
   user_id      uuid primary key references auth.users(id) on delete cascade,
   github_login text,
   display_name text,
@@ -43,41 +25,50 @@ create table public.profiles (
   athlete_id   uuid references public.athletes(id) on delete set null,
   created_at   timestamptz not null default now()
 );
-create unique index profiles_athlete_unique on public.profiles(athlete_id) where athlete_id is not null;
+-- One GitHub account per athlete.
+create unique index if not exists profiles_athlete_unique
+  on public.profiles(athlete_id) where athlete_id is not null;
 
+-- Auto-create a profile on signup; bootstrap the first admin.
 create or replace function public.handle_new_user()
 returns trigger language plpgsql security definer set search_path = public as $$
 declare login text;
 begin
   login := coalesce(new.raw_user_meta_data->>'user_name', new.raw_user_meta_data->>'preferred_username');
   insert into public.profiles (user_id, github_login, display_name, is_admin, status)
-  values (new.id, login, coalesce(new.raw_user_meta_data->>'full_name', login),
-          login = '587763',
-          case when login = '587763' then 'active' else 'pending' end)
+  values (
+    new.id, login,
+    coalesce(new.raw_user_meta_data->>'full_name', login),
+    login = '587763',
+    case when login = '587763' then 'active' else 'pending' end
+  )
   on conflict (user_id) do nothing;
   return new;
 end; $$;
+
 drop trigger if exists on_auth_user_created on auth.users;
 create trigger on_auth_user_created
-  after insert on auth.users for each row execute function public.handle_new_user();
+  after insert on auth.users
+  for each row execute function public.handle_new_user();
 
 -- ───────────────────────────────────────────────────────────────────────────
--- Helper functions
+-- 2. Helper functions (security definer so policies can use them safely)
 -- ───────────────────────────────────────────────────────────────────────────
 create or replace function public.is_admin()
 returns boolean language sql security definer stable set search_path = public as $$
   select coalesce((select is_admin from public.profiles where user_id = auth.uid()), false);
 $$;
+
 create or replace function public.is_active_linked()
 returns boolean language sql security definer stable set search_path = public as $$
-  select coalesce((select status='active' and athlete_id is not null
+  select coalesce((select status = 'active' and athlete_id is not null
                    from public.profiles where user_id = auth.uid()), false);
 $$;
 
 -- ───────────────────────────────────────────────────────────────────────────
--- Proposals (pending-change queue + verified-change history)
+-- 3. Proposals — the pending-change queue AND the history of verified changes
 -- ───────────────────────────────────────────────────────────────────────────
-create table public.proposals (
+create table if not exists public.proposals (
   id          uuid primary key default gen_random_uuid(),
   kind        text not null check (kind in ('claim','new_athlete','rename','pr','achievement')),
   approval    text not null check (approval in ('admin','peer')),
@@ -91,24 +82,42 @@ create table public.proposals (
 );
 
 -- ───────────────────────────────────────────────────────────────────────────
--- Row Level Security
+-- 4. Row Level Security
 -- ───────────────────────────────────────────────────────────────────────────
-alter table public.athletes  enable row level security;
-alter table public.profiles  enable row level security;
+alter table public.profiles enable row level security;
 alter table public.proposals enable row level security;
+alter table public.athletes enable row level security;
 
+-- profiles: signed-in users can read the roster (login + link + role); only admins write.
+drop policy if exists "profiles readable by authenticated" on public.profiles;
+create policy "profiles readable by authenticated"
+  on public.profiles for select to authenticated using (true);
+drop policy if exists "admins manage profiles" on public.profiles;
+create policy "admins manage profiles"
+  on public.profiles for update to authenticated
+  using (public.is_admin()) with check (public.is_admin());
+-- (inserts happen only via the signup trigger; no insert policy)
+
+-- proposals: signed-in users can read the queue/history; all writes go through the
+-- propose()/decide() functions below (no direct insert/update policies).
+drop policy if exists "proposals readable by authenticated" on public.proposals;
+create policy "proposals readable by authenticated"
+  on public.proposals for select to authenticated using (true);
+
+-- athletes: public read; only admins write DIRECTLY. Everyone else changes athletes
+-- through the verified/approved proposal flow (decide() runs as definer).
+drop policy if exists "Public read access" on public.athletes;
 create policy "Public read access" on public.athletes for select using (true);
-create policy "admins insert athletes" on public.athletes for insert to authenticated with check (public.is_admin());
-create policy "admins update athletes" on public.athletes for update to authenticated using (public.is_admin()) with check (public.is_admin());
-create policy "admins delete athletes" on public.athletes for delete to authenticated using (public.is_admin());
-
-create policy "profiles readable by authenticated" on public.profiles for select to authenticated using (true);
-create policy "admins manage profiles" on public.profiles for update to authenticated using (public.is_admin()) with check (public.is_admin());
-
-create policy "proposals readable by authenticated" on public.proposals for select to authenticated using (true);
+drop policy if exists "admins write athletes" on public.athletes;
+create policy "admins insert athletes" on public.athletes
+  for insert to authenticated with check (public.is_admin());
+create policy "admins update athletes" on public.athletes
+  for update to authenticated using (public.is_admin()) with check (public.is_admin());
+create policy "admins delete athletes" on public.athletes
+  for delete to authenticated using (public.is_admin());
 
 -- ───────────────────────────────────────────────────────────────────────────
--- Governed write paths
+-- 5. propose() / decide() — the governed write paths
 -- ───────────────────────────────────────────────────────────────────────────
 create or replace function public.propose(p_kind text, p_athlete uuid, p_payload jsonb)
 returns uuid language plpgsql security definer set search_path = public as $$
@@ -136,7 +145,8 @@ begin
     end if;
   elsif p_kind = 'new_athlete' then
     appr := 'admin';
-  else raise exception 'unknown proposal kind: %', p_kind;
+  else
+    raise exception 'unknown proposal kind: %', p_kind;
   end if;
 
   insert into public.proposals(kind, approval, athlete_id, proposer, payload)
@@ -156,7 +166,7 @@ begin
 
   if pr.approval = 'admin' then
     if not prof.is_admin then raise exception 'only an admin can decide this'; end if;
-  else
+  else  -- peer
     if not (prof.is_admin or (prof.status='active' and prof.athlete_id is not null and uid <> pr.proposer)) then
       raise exception 'a different active member (peer) or an admin must verify this';
     end if;
@@ -201,14 +211,20 @@ begin
 end; $$;
 
 -- ───────────────────────────────────────────────────────────────────────────
--- Realtime + seed
+-- 6. Realtime + backfill existing users (so the live admin exists immediately)
 -- ───────────────────────────────────────────────────────────────────────────
-alter publication supabase_realtime add table public.athletes;
-alter publication supabase_realtime add table public.proposals;
-alter publication supabase_realtime add table public.profiles;
+do $$ begin
+  alter publication supabase_realtime add table public.proposals;
+exception when duplicate_object then null; end $$;
+do $$ begin
+  alter publication supabase_realtime add table public.profiles;
+exception when duplicate_object then null; end $$;
 
-insert into public.athletes (name, bench, squat, deadlift, achievements) values
-  ('Alexander', 132.5, 120.0, 137.5, '{gripper90kg}'),
-  ('Daniel',    110.0, 137.5, 160.0, '{}'),
-  ('Hallvard',  110.0,  80.0,  90.0, '{}'),
-  ('Jens',      137.5,   0.0,   0.0, '{}');
+insert into public.profiles (user_id, github_login, display_name, is_admin, status)
+select u.id,
+       u.raw_user_meta_data->>'user_name',
+       coalesce(u.raw_user_meta_data->>'full_name', u.raw_user_meta_data->>'user_name'),
+       (u.raw_user_meta_data->>'user_name') = '587763',
+       case when (u.raw_user_meta_data->>'user_name') = '587763' then 'active' else 'pending' end
+from auth.users u
+on conflict (user_id) do nothing;

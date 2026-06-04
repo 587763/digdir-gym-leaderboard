@@ -47,17 +47,21 @@ js/store.js          ALL Supabase access: data CRUD, auth, realtime. UI never ca
 js/app.js            UI controller (class LeaderboardApp, global `app`); rendering, modals, tabs
 js/avatar.js         window.renderAvatar(athlete, size) — stick figure derived from name
 js/achievements.js   window.ACHIEVEMENTS registry (extensible)
-supabase/schema.sql  full DB state for a fresh install: tables + RLS + realtime + seed
+supabase/schema.sql  full DB state for a fresh install: tables + RLS + functions + seed
 supabase/migrations/ incremental SQL to apply to the live DB (run manually in SQL editor)
-supabase/functions/verify-editor/  Edge Function: server-side GitHub org-membership check
-supabase/config.toml  Supabase CLI config (for deploying the function)
 .github/workflows/deploy.yml  Pages deploy on push to main
 .claude/launch.json  preview server config (used by the preview tooling)
 ```
 
-Data shape (`athletes` table / row objects): `id` (uuid), `name`, `bench`, `squat`,
-`deadlift` (numerics), `achievements` (text[] of achievement ids), `avatar` (jsonb,
-reserved/unused), `updated_by`, `created_at`, `updated_at`.
+Data model (3 tables):
+- `athletes` — the board: `id` (uuid), `name`, `bench`/`squat`/`deadlift` (numerics),
+  `achievements` (text[] of achievement ids), `avatar` (jsonb, reserved), timestamps.
+  These are the *verified/displayed* values.
+- `profiles` — one per GitHub user: `user_id`, `github_login`, `is_admin`, `status`
+  ('pending'|'active'|'blocked'), `athlete_id` (the linked athlete; unique).
+- `proposals` — the pending-change queue AND the verified-change history: `kind`
+  ('claim'|'new_athlete'|'rename'|'pr'|'achievement'), `approval` ('admin'|'peer'),
+  `athlete_id`, `proposer`, `payload` (jsonb), `status`, `decided_by`, timestamps.
 
 ## Run & verify locally
 
@@ -104,24 +108,26 @@ with build type `workflow`; the workflow self-enables it (`configure-pages` with
 - **Threat model:** an internal, trust-based office board. The data is not secret
   (it's a public leaderboard). The main thing we protect against is anonymous
   drive-by vandalism.
-- **What's enforced (org-gating):** public read; writes require a row in the
-  `editors` table. That row is created **only** by the `verify-editor` Edge Function,
-  which checks GitHub `felleslosninger` membership server-side using the user's
-  `read:org`-scoped provider token. The client cannot fake editor status — RLS on
-  `athletes` checks `exists (select 1 from editors where user_id = auth.uid())`.
-  - Flow: sign in (requests `read:org`) → on the fresh session the frontend calls
-    `verify-editor` with `session.provider_token` → function verifies membership and
-    upserts/deletes the `editors` row → UI gates on `app.isEditor`, writes gate on RLS.
-  - Return visits have no provider token, so the frontend reads its own `editors`
-    row (allowed by the "read own editor row" policy) to know editor status.
-  - **Dependency:** this only works if `felleslosninger` permits the OAuth app to
-    read membership. If the function gets HTTP 403 from GitHub, an org owner must
-    approve the OAuth app (org "third-party application access" policy). HTTP 404 =
-    not a member. The function returns `github_status` to help debug.
-  - Don't gate on email domain — GitHub emails are often private/noreply here
-    ("allow users without email" is on).
-- **Changing the org:** edit `ORG` in `supabase/functions/verify-editor/index.ts`
-  (and the user-facing copy in `app.js` / this file), then redeploy the function.
+- **What's enforced (self-governance):** public read; all writes are governed by
+  RLS + two SECURITY DEFINER functions, so the client can't bypass the rules:
+  - **Admins** (`profiles.is_admin`) write `athletes` directly (RLS: `is_admin()`),
+    decide admin-proposals, and manage `profiles` (approve/link/grant-admin/block).
+  - **Everyone else** changes the board only through `proposals`, applied by the
+    `decide()` function:
+    - `pr` / `achievement` → `approval='peer'`: a *different* active+linked member (or
+      an admin) verifies. On approve, `decide()` updates the athlete and the approved
+      proposal row becomes the PR history.
+    - `rename` / `new_athlete` / `claim` → `approval='admin'`: an admin approves.
+      Approving a claim/new_athlete links the proposer (`status='active'`).
+  - `propose(kind, athlete, payload)` enforces who may propose what; `decide(id, ok)`
+    enforces who may approve and applies the effect. Both run as definer (bypass RLS),
+    which is why direct table writes can stay locked to admins.
+- **Bootstrap admin:** the signup trigger `handle_new_user()` (and the 0002 backfill)
+  marks GitHub login **`587763`** as admin+active. Change that literal in
+  `schema.sql` / the latest migration to change the first admin; everyone else is
+  promoted via the in-app Members panel.
+- **No external dependency:** governance is pure Postgres — no GitHub org, no Edge
+  Function, no extra OAuth scopes. Rollout = run the migration SQL.
 - **No secret key in the repo.** Only `sb_publishable_…` is committed. The
   `sb_secret_…` / service_role key bypasses RLS and must never appear in frontend
   code, config, or git history. (If one ever leaks, rotate it in the Supabase
@@ -161,12 +167,13 @@ These live outside git; a fresh session can't see them. Current config:
   via `gh api -X POST repos/<owner>/<repo>/pages -f build_type=workflow` using a token
   with `repo` scope. After that the workflow's `configure-pages` (`enablement: true`)
   manages it.
-- **verify-editor Edge Function** is deployed via the Supabase CLI (not the Pages
-  workflow). To (re)deploy: `supabase login` → `supabase link --project-ref
-  hqrqmkherwdkfvhjypuk` → `supabase functions deploy verify-editor`. It needs no
-  manual secrets (service role is auto-injected). The `read:org` scope is requested
-  client-side at sign-in, so the GitHub OAuth app needs no scope pre-registration —
-  but users must re-consent the first time after this shipped.
+- **No Edge Functions / no special OAuth scopes.** Governance is pure Postgres
+  (run the migration). Sign-in requests only the default scope. (An earlier
+  `verify-editor` Edge Function was abandoned — if it's still deployed in the
+  Supabase dashboard, it's unused and can be deleted.)
+- **Migrations are applied by hand:** paste each new file in `supabase/migrations/`
+  into the SQL editor in order. There's no automated migration runner. `0001` set up
+  org-gating (since removed); `0002` installed the current self-governance model.
 - **Maintenance TODO:** the workflow's actions (`checkout@v4`, `configure-pages@v5`,
   `deploy-pages@v4`, `upload-pages-artifact@v3`) emit a Node 20 deprecation warning;
   bump them when convenient.

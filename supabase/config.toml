@@ -1,8 +1,0 @@
-# Minimal Supabase CLI config for deploying the verify-editor Edge Function.
-# `supabase link --project-ref hqrqmkherwdkfvhjypuk` connects this to the project.
-project_id = "digdir-gym-leaderboard"
-
-[functions.verify-editor]
-# Require a valid Supabase auth token to invoke; the function then also derives
-# the user identity from that token before checking GitHub membership.
-verify_jwt = true
