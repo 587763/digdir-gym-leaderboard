@@ -1,6 +1,8 @@
+-- ⚠️ SUPERSEDED — do NOT run this. Kept only as historical record of what the live
+-- DB once had. The GitHub-org gating below was fully replaced by 0002 (self-
+-- governance). Fresh installs use schema.sql; the live DB has already moved past this.
+--
 -- Org-gating: only verified `felleslosninger` members can write.
--- Apply to the existing live DB by pasting into Supabase → SQL Editor → Run.
--- (Idempotent-ish: safe to re-run.)
 
 -- Verified editors. Rows are created ONLY by the verify-editor Edge Function
 -- (service role); nothing else can write to this table.

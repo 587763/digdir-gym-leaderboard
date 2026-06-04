@@ -26,16 +26,19 @@ Hand-drawn whiteboard aesthetic. Live-updating across everyone's screens.
 - Plain ES5/ES6 vanilla JS in `<script>` tags loaded in order (see `index.html`).
   Globals are intentional: `window.LEADERBOARD_CONFIG`, `window.ACHIEVEMENTS`,
   `window.renderAvatar`, `window.Store`, and `app`.
-- Security model is **Row Level Security (RLS)** in Postgres, not client code:
-  anyone can read; only signed-in (GitHub) users can write. Never rely on the
-  client to enforce permissions.
+- Security/governance lives in **Postgres** (RLS + `propose()`/`decide()` functions),
+  not client code — see "Security model" below. Never rely on the client to enforce
+  permissions; the UI gating is cosmetic.
 
 ### Why these choices (don't relitigate without reason)
 - GitHub Pages can't run a server, so the original Express+JSON-file backend was
   removed. Supabase gives shared persistence + auth + realtime with zero servers.
-- Auth = GitHub sign-in to edit. Hard-gating edits to the `felleslosninger` GitHub
-  org was deliberately deferred (org OAuth-app restrictions + private membership
-  make it unreliable; would need a Supabase Edge Function). See README "Future ideas".
+- GitHub is used only for **login/identity**. Authorization is the app's own
+  self-governance model (admins, claims, peer-verified PRs). An earlier attempt to
+  hard-gate edits to the `felleslosninger` GitHub org was abandoned: the org
+  restricts third-party OAuth apps, so it required an org-owner to approve the app —
+  an external blocker we couldn't control. The self-governance model has no such
+  dependency.
 
 ## Repo map
 
@@ -183,10 +186,15 @@ These live outside git; a fresh session can't see them. Current config:
 - **Add an achievement:** append one entry to `js/achievements.js`. The edit form,
   badges, and Hall of Fame all read from `window.ACHIEVEMENTS` — no other code
   changes needed. The `id` is stored in `athletes.achievements[]`.
-- **Add a lift:** touch `index.html` (form field + leaderboard section/table),
-  `js/app.js` (`LIFTS`, `LIFT_META`, `formData`, value handling), and
-  `supabase/schema.sql` (new column + a migration note). Total is computed from the
-  three core lifts.
+- **Add a lift:** more involved — it's referenced in several places. DB: a new column
+  on `athletes` (in `schema.sql` + a new migration) and the `pr` branch of `decide()`
+  (which lists bench/squat/deadlift explicitly). Frontend: `LIFTS` + `LIFT_META` in
+  `js/app.js`, the admin athlete form and the "My PRs" form in `index.html` (+ their
+  read/diff logic in `saveAthlete`/`submitMine`), and a leaderboard section/table.
+  Total is computed from the core lifts.
+- **Change the bootstrap admin:** the GitHub login literal (`587763`) lives in
+  `handle_new_user()` in `schema.sql` and migration `0002`. After deploy, promote
+  others via the in-app Members panel instead.
 - **Restyle:** everything is in `styles.css`. Keep the whiteboard/hand-drawn feel
   (marker fonts, the `#roughen` / `#squiggle` SVG filters defined in `index.html`).
 

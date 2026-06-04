@@ -6,8 +6,20 @@ whiteboard look; the board updates live across everyone's screens.
 
 **Live:** https://587763.github.io/digdir-gym-leaderboard/
 
-- View is open to everyone. **Sign in with GitHub to edit.**
+- View is open to everyone. **Sign in with GitHub** to take part.
 - Changes appear in real time (nice on a wall-mounted display).
+
+## Who can change what
+
+It governs itself, mirroring our whiteboard culture (a PR isn't real until someone
+witnesses it):
+
+- **Claim your spot** — sign in, then link your GitHub to your athlete (or add a new
+  one). An **admin approves** the link.
+- **Your PRs & achievements** need a **peer** to verify them — any other linked member
+  (you can't verify your own). Until verified, the change is pending.
+- **Name changes & new athletes** need an **admin**.
+- **Admins** manage members and can edit the board directly.
 
 ## How it works
 
@@ -16,11 +28,12 @@ whiteboard look; the board updates live across everyone's screens.
 - **[Supabase](https://supabase.com)** (hosted Postgres) provides the shared data,
   GitHub sign-in, and realtime updates. The browser talks to it directly — there is
   no server to run.
-- **Security is enforced by the database** (Row Level Security), not the frontend:
-  anyone can read; only signed-in users can write.
+- **The rules are enforced by the database**, not the frontend — Row Level Security
+  plus a couple of Postgres functions decide who can change what (see above). The
+  governance is pure Postgres: no extra servers, no GitHub-org dependency.
 
 That's the whole design: keep it dead simple to host (a folder of static files) and
-let a managed service handle the stateful parts.
+let a managed service handle the stateful, governed parts.
 
 ## Developing
 
