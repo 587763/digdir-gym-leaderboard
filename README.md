@@ -1,160 +1,98 @@
-# Digdir Workout Leaderboard 💪
+# 💪 Digdir Gym Leaderboard
 
-A modern, interactive web-based leaderboard for tracking workout Personal Records (PRs) - Bench Press, Squat, and Deadlift.
+A digital version of our gym whiteboard — squat / bench / deadlift PRs, a combined
+total, podiums, and a Hall of Fame for fun achievements. Hand-drawn whiteboard look,
+live-updating across everyone's screens.
 
-## Features
+- **Static site** (no build step) — deploys to GitHub Pages as-is.
+- **Supabase** for shared, persistent storage + GitHub sign-in + realtime updates.
+- **View is open to everyone; you sign in with GitHub to edit.**
 
-- **Track Multiple Athletes**: Add and manage multiple athletes with their PRs
-- **Four Leaderboards**: Separate rankings for Bench Press, Squat, Deadlift, and Combined Total
-- **Persistent Storage**: Data saved to server file - works across all browsers and devices!
-- **Shared Access**: Everyone on your network can access and update the same leaderboard
-- **Export/Import**: Backup and restore your data with JSON export/import
-- **Responsive Design**: Works seamlessly on desktop, tablet, and mobile devices
-- **Real-time Updates**: Leaderboards update instantly when you add or edit records
-- **Visual Rankings**: Gold 🥇, Silver 🥈, and Bronze 🥉 medals for top 3
+---
 
-## Quick Start
+## How it fits together
 
-### With Backend (Recommended - Persistent Data)
+```
+index.html          markup + loads scripts (Supabase from CDN)
+styles.css          whiteboard theme
+js/config.js        ← your Supabase URL + anon key go here
+js/store.js         all Supabase calls (data, auth, realtime)
+js/app.js           UI logic
+js/avatar.js        stick-figure avatars (derived from name)
+js/achievements.js  achievement registry (add new ones here)
+supabase/schema.sql  paste-and-run database setup + seed data
+```
 
-1. **Install dependencies**:
+There is **no backend to run** — the browser talks to Supabase directly, and Row
+Level Security in the database is what actually enforces "only signed-in users can edit".
+
+---
+
+## Setup (one time, ~10 minutes)
+
+### 1. Create the database
+1. Make a free project at [supabase.com](https://supabase.com).
+2. In the dashboard → **SQL Editor** → paste all of [`supabase/schema.sql`](supabase/schema.sql) → **Run**.
+   This creates the `athletes` table, the security policies, realtime, and seeds the current board.
+
+### 2. Turn on GitHub sign-in
+1. Create a GitHub OAuth App: GitHub → Settings → Developer settings → **OAuth Apps** → New.
+   - **Homepage URL**: your site URL (e.g. `https://<org>.github.io/digdir-leaderboard/`)
+   - **Authorization callback URL**: `https://<your-project-ref>.supabase.co/auth/v1/callback`
+2. In Supabase → **Authentication → Providers → GitHub**: paste the OAuth app's
+   Client ID + secret and enable it.
+3. In Supabase → **Authentication → URL Configuration**: add your site URL to
+   **Redirect URLs** (and as the Site URL). Add `http://localhost:3000` too for local dev.
+
+### 3. Connect the frontend
+Open [`js/config.js`](js/config.js) and paste your **Project URL** and **anon public key**
+(Supabase → Settings → API):
+
+```js
+window.LEADERBOARD_CONFIG = {
+  SUPABASE_URL: 'https://YOUR_PROJECT_REF.supabase.co',
+  SUPABASE_ANON_KEY: 'eyJ...your-anon-key...',
+};
+```
+
+> ℹ️ The anon key is **meant to be public** and committed — security comes from the
+> RLS policies, not from hiding it. Never commit the *service_role* key.
+
+---
+
+## Run locally
+
 ```bash
-npm install
+npm run dev      # serves on http://localhost:3000 (uses npx serve, no install)
+# or:
+python3 -m http.server 3000
 ```
 
-2. **Start the server**:
-```bash
-npm start
-```
+## Deploy (GitHub Pages)
 
-3. **Open your browser** and navigate to:
-```
-http://localhost:3000
-```
+1. Push to `main`.
+2. Repo → **Settings → Pages → Build and deployment → Source: GitHub Actions**.
+3. The included [workflow](.github/workflows/deploy.yml) publishes the site on every push.
 
-**That's it!** Your data is now saved on the server and accessible from any browser.
+---
 
-📖 **See [BACKEND-SETUP.md](BACKEND-SETUP.md) for detailed backend documentation**
+## Editing the board
 
-### Without Backend (Browser-Only Mode)
+- Anyone can **view**.
+- Click **Sign in with GitHub** to add/edit/delete athletes.
+- Changes appear **live** on every open screen (great for a wall-mounted display).
+- **Backup** downloads the current board as JSON anytime.
 
-If you just want to try it out locally without installing Node.js:
+## Adding a new achievement
 
-Simply open `index.html` in your web browser. 
+Append one entry to [`js/achievements.js`](js/achievements.js) — the edit form, badges,
+and Hall of Fame all update automatically. The achievement `id` is stored in the
+`athletes.achievements` array.
 
-⚠️ Note: This mode uses browser localStorage, so data is browser-specific and not shared.
+---
 
-## Usage
+## Future ideas (not built yet)
 
-1. **Add Athletes**: Click the "+ Add Athlete" button to add a new athlete with their PRs
-2. **Edit Records**: Click "Edit" next to any athlete to update their records
-3. **Delete Athletes**: Click "Delete" to remove an athlete from the leaderboard
-4. **Export Data**: Download a backup of all your data as a JSON file
-5. **Import Data**: Restore data from a previously exported JSON file
-
-## Data Persistence
-
-### With Backend Server (Default)
-All data is stored in `data/leaderboard-data.json` on the server. This means:
-- ✅ Works across all browsers and devices
-- ✅ Shared among all users on the network
-- ✅ Survives browser restarts and updates
-- ✅ Easy to backup (just copy the file)
-- ✅ No data loss when clearing browser cache
-
-**Network Access:** Once the server is running, anyone on your network can access it at:
-- Local: `http://localhost:3000`
-- Network: `http://YOUR_IP_ADDRESS:3000`
-
-**Data Location:** `data/leaderboard-data.json`
-
-### Browser-Only Mode (Fallback)
-If you open `index.html` directly without the server:
-- ⚠️ Data stored in browser's localStorage
-- ⚠️ Browser-specific (use Export/Import to transfer)
-- ⚠️ Lost when clearing browser data
-- ℹ️ Good for testing or personal use only
-
-## Deployment
-
-### Easy Cloud Deployment (Free)
-
-#### Render.com (Recommended)
-1. Push to GitHub
-2. Create account at [render.com](https://render.com)
-3. New → Web Service
-4. Connect your repo
-5. Build: `npm install`
-6. Start: `npm start`
-7. Deploy! 🚀
-
-#### Railway.app
-1. Push to GitHub
-2. Go to [railway.app](https://railway.app)
-3. New Project → Deploy from GitHub
-4. Auto-detects and deploys
-5. Done! 🎉
-
-### Local Network (Office)
-Keep server running on one office computer:
-```bash
-npm start
-```
-
-Everyone access at: `http://COMPUTER_IP:3000`
-
-**See [BACKEND-SETUP.md](BACKEND-SETUP.md) for detailed deployment options**
-
-## Customization
-
-### Change Weight Units
-Edit `index.html` to change "kg" to "lbs" in the form labels and table headers.
-
-### Modify Colors
-Edit the CSS variables in `styles.css`:
-```css
-:root {
-    --primary-color: #2563eb;  /* Change main theme color */
-    --success-color: #10b981;  /* Change success color */
-    /* ... etc */
-}
-```
-
-### Add More Lifts
-To add additional exercises (e.g., Overhead Press):
-1. Add the form field in `index.html`
-2. Add a new leaderboard section in `index.html`
-3. Update the athlete object in `app.js` to include the new lift
-4. Add rendering logic for the new leaderboard
-
-## Tech Stack
-
-**Frontend:**
-- **HTML5**: Structure
-- **CSS3**: Styling with CSS Grid and Flexbox
-- **Vanilla JavaScript**: Logic and interactivity
-- **Fetch API**: Communication with backend
-
-**Backend:**
-- **Node.js**: Runtime environment
-- **Express**: Web server framework
-- **File System**: JSON file-based database
-
-Minimal dependencies, easy to understand and maintain!
-
-## Browser Support
-
-Works on all modern browsers:
-- Chrome/Edge (latest)
-- Firefox (latest)
-- Safari (latest)
-- Mobile browsers
-
-## License
-
-MIT License - feel free to use this for your own leaderboard!
-
-## Contributing
-
-This is a simple project, but feel free to submit issues or pull requests if you have ideas for improvements!
-
+- Avatar **customizer** (avatars are currently auto-generated from the name).
+- Restricting editing to members of a specific GitHub org via a Supabase Edge Function.
+- Weight classes / bodyweight, history graphs, "PR of the week".

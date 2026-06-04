@@ -13,10 +13,6 @@ Thumbs.db
 *.log
 npm-debug.log*
 
-# Node.js
+# Node (only used for the optional local dev server)
 node_modules/
-package-lock.json
-
-# Data
-data/
 

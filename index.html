@@ -1,213 +1,155 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Digdir Workout Leaderboard</title>
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Permanent+Marker&family=Caveat:wght@400;500;600;700&family=Indie+Flower&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="styles.css">
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Digdir Gym Leaderboard</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Permanent+Marker&family=Caveat:wght@400;500;600;700&family=Indie+Flower&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css">
 </head>
 <body>
-    <div class="container">
-        <header>
-            <h1>💪 Digdir Workout Leaderboard</h1>
-            <p class="subtitle">Track your Bench, Squat & Deadlift PRs</p>
-        </header>
+  <!-- Hand-drawn SVG filters, referenced by avatars and the title underline -->
+  <svg width="0" height="0" style="position:absolute" aria-hidden="true">
+    <defs>
+      <filter id="roughen">
+        <feTurbulence type="fractalNoise" baseFrequency="0.02" numOctaves="2" seed="7" result="noise"/>
+        <feDisplacementMap in="SourceGraphic" in2="noise" scale="1.6"/>
+      </filter>
+      <filter id="squiggle">
+        <feTurbulence type="fractalNoise" baseFrequency="0.03" numOctaves="3" seed="3" result="noise"/>
+        <feDisplacementMap in="SourceGraphic" in2="noise" scale="3"/>
+      </filter>
+    </defs>
+  </svg>
 
-        <div class="controls">
-            <button id="manageAthletesBtn" class="btn btn-primary">👥 Manage Athletes</button>
-            <button id="exportBtn" class="btn btn-secondary">Export Data</button>
-            <label for="importFile" class="btn btn-secondary">
-                Import Data
-                <input type="file" id="importFile" accept=".json" style="display: none;">
-            </label>
+  <div class="container">
+    <header>
+      <div class="header-top">
+        <div class="header-titles">
+          <h1>💪 Digdir Gym Leaderboard</h1>
+          <p class="subtitle">Squat · Bench · Deadlift — our whiteboard PRs, digitized</p>
         </div>
+        <div id="authArea" class="auth-area"></div>
+      </div>
+    </header>
 
-        <!-- Tab Navigation -->
-        <div class="tab-navigation">
-            <button class="tab-btn active" data-tab="lifts">Main Lifts</button>
-            <button class="tab-btn" data-tab="total">Total</button>
-            <button class="tab-btn" data-tab="fun">Fun Lifts</button>
-        </div>
-
-        <!-- Add/Edit Athlete Modal -->
-        <div id="athleteModal" class="modal">
-            <div class="modal-content">
-                <span class="close">&times;</span>
-                <h2 id="modalTitle">Add Athlete</h2>
-                <form id="athleteForm">
-                    <div class="form-group">
-                        <label for="athleteName">Name:</label>
-                        <input type="text" id="athleteName" required>
-                    </div>
-                    <div class="form-group">
-                        <label for="bench">Bench Press (kg):</label>
-                        <input type="number" id="bench" step="0.5" min="0" value="0">
-                    </div>
-                    <div class="form-group">
-                        <label for="squat">Squat (kg):</label>
-                        <input type="number" id="squat" step="0.5" min="0" value="0">
-                    </div>
-                    <div class="form-group">
-                        <label for="deadlift">Deadlift (kg):</label>
-                        <input type="number" id="deadlift" step="0.5" min="0" value="0">
-                    </div>
-                    <div class="form-group form-group-checkbox">
-                        <label>
-                            <input type="checkbox" id="gripper90kg">
-                            <span>💪 Can close 90kg gripper</span>
-                        </label>
-                    </div>
-
-                    <div class="form-divider"></div>
-
-                    <h3 class="form-section-title">🎨 Customize Avatar</h3>
-                    <div class="avatar-preview-container">
-                        <div id="avatarPreview" class="avatar-preview"></div>
-                    </div>
-
-                    <div class="form-group">
-                        <label for="avatarHair">Hairstyle:</label>
-                        <select id="avatarHair" class="avatar-select">
-                            <option value="none">Bald</option>
-                            <option value="short" selected>Short Hair</option>
-                            <option value="spiky">Spiky</option>
-                            <option value="long">Long Hair</option>
-                            <option value="afro">Afro</option>
-                            <option value="mohawk">Mohawk</option>
-                        </select>
-                    </div>
-
-                    <div class="form-group">
-                        <label for="avatarFacialHair">Facial Hair:</label>
-                        <select id="avatarFacialHair" class="avatar-select">
-                            <option value="none" selected>Clean Shaven</option>
-                            <option value="beard">Beard</option>
-                            <option value="mustache">Mustache</option>
-                            <option value="goatee">Goatee</option>
-                            <option value="fullBeard">Full Beard</option>
-                        </select>
-                    </div>
-
-                    <div class="form-group">
-                        <label for="avatarOutfit">Outfit:</label>
-                        <select id="avatarOutfit" class="avatar-select">
-                            <option value="basic" selected>Basic</option>
-                            <option value="tank">Tank Top</option>
-                            <option value="hoodie">Hoodie</option>
-                            <option value="suit">Suit</option>
-                            <option value="gripper" id="outfitGripper" disabled>🔒 Gripper Champion Jersey</option>
-                        </select>
-                    </div>
-
-                    <div class="form-group">
-                        <label for="avatarAccessory">Accessory:</label>
-                        <select id="avatarAccessory" class="avatar-select">
-                            <option value="none" selected>None</option>
-                            <option value="glasses">Glasses</option>
-                            <option value="headband">Headband</option>
-                            <option value="gripperBadge" id="accessoryGripperBadge" disabled>🔒 Gripper Badge</option>
-                        </select>
-                    </div>
-
-                    <div class="form-actions">
-                        <button type="submit" class="btn btn-primary">Save</button>
-                        <button type="button" class="btn btn-secondary" id="cancelBtn">Cancel</button>
-                    </div>
-                </form>
-            </div>
-        </div>
-
-        <!-- Manage Athletes Modal -->
-        <div id="manageModal" class="modal">
-            <div class="modal-content modal-large">
-                <span class="close-manage">&times;</span>
-                <h2>Manage Athletes</h2>
-                <button id="addNewAthleteBtn" class="btn btn-primary" style="margin-bottom: 20px;">+ Add New Athlete</button>
-                <div id="athletesList" class="athletes-list"></div>
-            </div>
-        </div>
-
-        <!-- Leaderboards -->
-        <div class="tab-content active" id="lifts-tab">
-            <div class="leaderboards">
-                <div class="leaderboard-section" data-lift="squat">
-                    <h2 class="lift-header" data-lift="squat">🦵 Squat</h2>
-                    <table class="leaderboard-table" id="squatTable">
-                        <thead>
-                            <tr>
-                                <th>Rank</th>
-                                <th>Name</th>
-                                <th>PR (kg)</th>
-                            </tr>
-                        </thead>
-                        <tbody></tbody>
-                    </table>
-                </div>
-
-                <div class="leaderboard-section focused" data-lift="bench">
-                    <h2 class="lift-header" data-lift="bench">🏋️ Bench Press</h2>
-                    <table class="leaderboard-table" id="benchTable">
-                        <thead>
-                            <tr>
-                                <th>Rank</th>
-                                <th>Name</th>
-                                <th>PR (kg)</th>
-                            </tr>
-                        </thead>
-                        <tbody></tbody>
-                    </table>
-                </div>
-
-                <div class="leaderboard-section" data-lift="deadlift">
-                    <h2 class="lift-header" data-lift="deadlift">💀 Deadlift</h2>
-                    <table class="leaderboard-table" id="deadliftTable">
-                        <thead>
-                            <tr>
-                                <th>Rank</th>
-                                <th>Name</th>
-                                <th>PR (kg)</th>
-                            </tr>
-                        </thead>
-                        <tbody></tbody>
-                    </table>
-                </div>
-            </div>
-        </div>
-
-        <div class="tab-content" id="total-tab">
-            <div class="leaderboards">
-                <div class="leaderboard-section leaderboard-total focused" data-lift="total">
-                    <h2>🏆 Total (Combined)</h2>
-                    <table class="leaderboard-table" id="totalTable">
-                        <thead>
-                            <tr>
-                                <th>Rank</th>
-                                <th>Name</th>
-                                <th>Total (kg)</th>
-                            </tr>
-                        </thead>
-                        <tbody></tbody>
-                    </table>
-                </div>
-            </div>
-        </div>
-
-        <div class="tab-content" id="fun-tab">
-            <div class="fun-lifts-container">
-                <div class="achievement-section">
-                    <h2>💪 90kg Gripper Club</h2>
-                    <p class="achievement-description">The elite few who have conquered the 90kg grip strengthener!</p>
-                    <div id="gripperHallOfFame" class="hall-of-fame"></div>
-                </div>
-            </div>
-        </div>
+    <div class="controls">
+      <button id="manageAthletesBtn" class="btn btn-primary edit-only">👥 Manage Athletes</button>
+      <button id="exportBtn" class="btn btn-secondary">⬇ Backup</button>
     </div>
 
-    <script src="avatar.js"></script>
-    <script src="app.js"></script>
+    <div class="tab-navigation">
+      <button class="tab-btn active" data-tab="lifts">Main Lifts</button>
+      <button class="tab-btn" data-tab="total">Total</button>
+      <button class="tab-btn" data-tab="fun">🏆 Hall of Fame</button>
+    </div>
+
+    <!-- Add / Edit modal -->
+    <div id="athleteModal" class="modal">
+      <div class="modal-content">
+        <span class="close">&times;</span>
+        <h2 id="modalTitle">Add athlete</h2>
+        <form id="athleteForm">
+          <div class="form-body">
+            <div class="form-fields">
+              <div class="form-group">
+                <label for="athleteName">Name</label>
+                <input type="text" id="athleteName" required autocomplete="off">
+              </div>
+              <div class="form-row">
+                <div class="form-group">
+                  <label for="squat">🦵 Squat (kg)</label>
+                  <input type="number" id="squat" step="0.5" min="0" value="0">
+                </div>
+                <div class="form-group">
+                  <label for="bench">🏋️ Bench (kg)</label>
+                  <input type="number" id="bench" step="0.5" min="0" value="0">
+                </div>
+                <div class="form-group">
+                  <label for="deadlift">💀 Deadlift (kg)</label>
+                  <input type="number" id="deadlift" step="0.5" min="0" value="0">
+                </div>
+              </div>
+              <h3 class="form-section-title">🏅 Achievements</h3>
+              <div id="achievementFields" class="achievement-fields"></div>
+            </div>
+            <div class="avatar-preview-container">
+              <div id="avatarPreview" class="avatar-preview"></div>
+              <p class="avatar-note">Your figure is drawn from your name.</p>
+            </div>
+          </div>
+          <div class="form-actions">
+            <button type="submit" class="btn btn-primary">Save</button>
+            <button type="button" class="btn btn-secondary" id="cancelBtn">Cancel</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <!-- Manage modal -->
+    <div id="manageModal" class="modal">
+      <div class="modal-content modal-large">
+        <span class="close-manage">&times;</span>
+        <h2>Manage Athletes</h2>
+        <button id="addNewAthleteBtn" class="btn btn-primary" style="margin-bottom:20px;">+ Add New Athlete</button>
+        <div id="athletesList" class="athletes-list"></div>
+      </div>
+    </div>
+
+    <!-- Main lifts -->
+    <div class="tab-content active" id="lifts-tab">
+      <div class="leaderboards">
+        <div class="leaderboard-section" data-lift="squat">
+          <h2 class="lift-header" data-lift="squat">🦵 Squat</h2>
+          <table class="leaderboard-table" id="squatTable">
+            <thead><tr><th>Rank</th><th>Name</th><th>PR (kg)</th></tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+        <div class="leaderboard-section focused" data-lift="bench">
+          <h2 class="lift-header" data-lift="bench">🏋️ Bench Press</h2>
+          <table class="leaderboard-table" id="benchTable">
+            <thead><tr><th>Rank</th><th>Name</th><th>PR (kg)</th></tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+        <div class="leaderboard-section" data-lift="deadlift">
+          <h2 class="lift-header" data-lift="deadlift">💀 Deadlift</h2>
+          <table class="leaderboard-table" id="deadliftTable">
+            <thead><tr><th>Rank</th><th>Name</th><th>PR (kg)</th></tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </div>
+      <p class="hint">Tap a lift's title to spotlight it with a podium.</p>
+    </div>
+
+    <!-- Total -->
+    <div class="tab-content" id="total-tab">
+      <div class="leaderboards">
+        <div class="leaderboard-section leaderboard-total focused" data-lift="total">
+          <h2>🏆 Total (Combined)</h2>
+          <table class="leaderboard-table" id="totalTable">
+            <thead><tr><th>Rank</th><th>Name</th><th>Total (kg)</th></tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- Hall of Fame -->
+    <div class="tab-content" id="fun-tab">
+      <div id="hallOfFame" class="fun-lifts-container"></div>
+    </div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="js/config.js"></script>
+  <script src="js/achievements.js"></script>
+  <script src="js/avatar.js"></script>
+  <script src="js/store.js"></script>
+  <script src="js/app.js"></script>
 </body>
 </html>
-
