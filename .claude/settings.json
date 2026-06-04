@@ -1,0 +1,29 @@
+{
+  "permissions": {
+    "allow": [
+      "Read",
+      "Edit",
+      "Write",
+      "Bash(git status:*)",
+      "Bash(git diff:*)",
+      "Bash(git log:*)",
+      "Bash(git show:*)",
+      "Bash(git branch:*)",
+      "Bash(git ls-files:*)",
+      "Bash(git remote -v)",
+      "Bash(npm run dev)",
+      "Bash(npx --yes serve:*)",
+      "Bash(python3 -m http.server:*)",
+      "Bash(curl -s http://localhost:*)",
+      "Bash(curl -s https://587763.github.io/digdir-gym-leaderboard/*)",
+      "Bash(env -u GH_TOKEN gh run list:*)",
+      "Bash(env -u GH_TOKEN gh run view:*)",
+      "Bash(env -u GH_TOKEN gh run watch:*)",
+      "Bash(env -u GH_TOKEN gh api repos/587763/digdir-gym-leaderboard/pages)",
+      "mcp__Claude_Preview__preview_start",
+      "mcp__Claude_Preview__preview_screenshot",
+      "mcp__Claude_Preview__preview_console_logs",
+      "mcp__Claude_Preview__preview_eval"
+    ]
+  }
+}

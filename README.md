@@ -8,6 +8,12 @@ live-updating across everyone's screens.
 - **Supabase** for shared, persistent storage + GitHub sign-in + realtime updates.
 - **View is open to everyone; you sign in with GitHub to edit.**
 
+> **Live:** https://587763.github.io/digdir-gym-leaderboard/
+>
+> This project is predominantly **AI-agent maintained**. If you're an agent (or a
+> human doing dev work), read **[CLAUDE.md](CLAUDE.md)** first — it's the source of
+> truth for architecture, conventions, how to run/verify, and gotchas.
+
 ---
 
 ## How it fits together
