@@ -42,11 +42,9 @@ class LeaderboardApp {
     await this.loadIdentity();
     await this.loadData();
 
-    window.Store.subscribe(async () => {
-      await this.loadData();
-      this.render();
-      this.refreshOpenModals();
-    });
+    // Any DB change → re-fetch everything, INCLUDING my own profile, so an admin
+    // approving/linking me updates my permissions live without a manual refresh.
+    window.Store.subscribe(() => this.refreshAll());
     window.Store.onAuthChange(async (session) => {
       this.user = session?.user ?? null;
       this.profile = this.user ? await window.Store.myProfile() : null;
@@ -63,6 +61,17 @@ class LeaderboardApp {
     const session = await window.Store.getSession();
     this.user = session?.user ?? null;
     this.profile = this.user ? await window.Store.myProfile() : null;
+  }
+
+  // Re-fetch my identity + all board data, then re-render everything. Used by the
+  // realtime subscription and on tab-focus, so role/permission changes apply live.
+  async refreshAll() {
+    if (!window.Store.configured) return;
+    this.profile = this.user ? await window.Store.myProfile() : null;
+    await this.loadData();
+    this.reflectAuth();
+    this.render();
+    this.refreshOpenModals();
   }
 
   async loadData() {
@@ -138,6 +147,10 @@ class LeaderboardApp {
       if (e.target.classList.contains('modal')) e.target.style.display = 'none';
     });
     window.addEventListener('keydown', (e) => { if (e.key === 'Escape') this.closeAll(); });
+
+    // Fallback if a realtime event is missed: refresh when the tab regains focus.
+    document.addEventListener('visibilitychange', () => { if (!document.hidden) this.refreshAll(); });
+    window.addEventListener('focus', () => this.refreshAll());
   }
 
   // --- modal plumbing -------------------------------------------------------
