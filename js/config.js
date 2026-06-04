@@ -1,13 +1,13 @@
 // Supabase connection config.
 //
-// These two values are SAFE to commit publicly. The anon key is designed to be
-// shipped in client code — all real protection comes from Row Level Security
-// policies in the database (see supabase/schema.sql), not from hiding this key.
+// These two values are SAFE to commit publicly. The publishable key is designed
+// to be shipped in client code — all real protection comes from Row Level
+// Security policies in the database (see supabase/schema.sql), not from hiding it.
+// Never put the *secret* key (sb_secret_...) here.
 //
-// To fill these in: Supabase dashboard → your project → Settings → API.
-//   Project URL  -> SUPABASE_URL
-//   anon public  -> SUPABASE_ANON_KEY
+// Find these in: Supabase dashboard → Settings → API Keys (publishable key)
+// and Settings → Data API (Project URL).
 window.LEADERBOARD_CONFIG = {
-  SUPABASE_URL: 'https://YOUR_PROJECT_REF.supabase.co',
-  SUPABASE_ANON_KEY: 'YOUR_ANON_PUBLIC_KEY',
+  SUPABASE_URL: 'https://hqrqmkherwdkfvhjypuk.supabase.co',
+  SUPABASE_ANON_KEY: 'sb_publishable_dTZMDmmYoRz0rHNmwopwkA_bLahQzrY',
 };
