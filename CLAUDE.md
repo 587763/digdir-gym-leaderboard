@@ -96,6 +96,68 @@ with build type `workflow`; the workflow self-enables it (`configure-pages` with
   must be added to Supabase → Authentication → URL Configuration (Site URL +
   Redirect URLs, e.g. `https://…/**`).
 
+## Security model & hardening
+
+- **Threat model:** an internal, trust-based office board. The data is not secret
+  (it's a public leaderboard). The main thing we protect against is anonymous
+  drive-by vandalism.
+- **What's enforced:** RLS = public read, authenticated write. The publishable key
+  and the whole site are public; that's fine because the key only grants the `anon`
+  (read-only) role until a real GitHub login produces a signed JWT.
+- **Known residual risk (by design, for now):** "authenticated" means *any* GitHub
+  user on the internet, not just Digdir staff — so anyone willing to sign in with
+  GitHub can edit/delete rows. This was an accepted v1 tradeoff (org-gating was
+  deferred). To harden when desired, pick one:
+  - **Editor allowlist:** an `editors` table of allowed GitHub user ids; change the
+    write policies to `... using (auth.jwt()->>'sub' in (select github_id from editors))`.
+    Reliable, low effort, needs manual list upkeep.
+  - **Org gating:** a Supabase Edge Function that verifies `felleslosninger`
+    membership server-side. More work; depends on org OAuth-app policy.
+  - Don't gate on email domain — GitHub emails are often private/noreply here
+    ("allow users without email" is on).
+- **No secret key in the repo.** Only `sb_publishable_…` is committed. The
+  `sb_secret_…` / service_role key bypasses RLS and must never appear in frontend
+  code, config, or git history. (If one ever leaks, rotate it in the Supabase
+  dashboard immediately.)
+- **Third-party JS is pinned + SRI'd.** `index.html` loads an exact supabase-js
+  version with a Subresource Integrity hash, so a tampered CDN response is rejected.
+  To upgrade: change the version, recompute the hash from the same
+  `/dist/umd/supabase.js` URL (`curl -sL <url> | openssl dgst -sha384 -binary |
+  openssl base64 -A`), and update both attributes. Don't switch to the bare
+  `@2`/unversioned URL — it's auto-minified by the CDN and breaks SRI.
+- **Input handling:** athlete names are user-controlled. Always escape before
+  inserting into HTML (`app.escapeHtml` for element text; `escapeAttr` in avatar.js
+  for attributes). Lift values are coerced to non-negative numbers; the DB also has
+  `check (… >= 0)` constraints.
+- **GitHub Actions:** the deploy workflow runs only on push to `main` / manual
+  dispatch (never on fork PRs) and uses least-privilege permissions. Keep it that way.
+
+## Operational state (external services — not in the repo)
+
+These live outside git; a fresh session can't see them. Current config:
+
+- **Supabase project** ref `hqrqmkherwdkfvhjypuk` (URL in `js/config.js`). On the
+  free tier. Created with Data API enabled, "automatically expose new tables" on, and
+  "automatic RLS" on. Schema is `supabase/schema.sql` (run manually in the SQL editor
+  for any model change — there is no migration runner).
+- **Auth:** GitHub provider enabled in Supabase with "allow users without email" on.
+  Backed by a **GitHub OAuth App** (owned by the user's account; Client ID + secret
+  stored only in Supabase, never in the repo). The OAuth callback URL is the Supabase
+  one: `https://hqrqmkherwdkfvhjypuk.supabase.co/auth/v1/callback`.
+- **Auth URL allowlist** (Supabase → Authentication → URL Configuration) must include
+  every origin the app is served from, or sign-in redirects fail. Currently: Site URL
+  = the Pages URL; Redirect URLs = `http://localhost:3000/**` and
+  `https://587763.github.io/digdir-gym-leaderboard/**`. **Add a new entry whenever you
+  serve from a new origin** (custom domain, preview, etc.).
+- **GitHub Pages** was enabled with build type `workflow`. On a brand-new repo the
+  Actions integration token can't create the Pages site itself, so it was enabled once
+  via `gh api -X POST repos/<owner>/<repo>/pages -f build_type=workflow` using a token
+  with `repo` scope. After that the workflow's `configure-pages` (`enablement: true`)
+  manages it.
+- **Maintenance TODO:** the workflow's actions (`checkout@v4`, `configure-pages@v5`,
+  `deploy-pages@v4`, `upload-pages-artifact@v3`) emit a Node 20 deprecation warning;
+  bump them when convenient.
+
 ## Common tasks
 
 - **Add an achievement:** append one entry to `js/achievements.js`. The edit form,

@@ -89,13 +89,23 @@ function renderOutfit(style) {
   }
 }
 
+// Escape text for safe interpolation into an HTML/SVG attribute.
+function escapeAttr(text) {
+  return String(text == null ? '' : text)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
 // Public: returns an inline SVG string for an athlete.
 window.renderAvatar = function renderAvatar(athlete, size = 100) {
   const c = configFor(athlete);
   const stroke = '#2c3e50';
   return `
     <svg class="avatar-svg" viewBox="0 0 100 124" width="${size}" height="${size * 1.24}"
-         xmlns="http://www.w3.org/2000/svg" role="img" aria-label="${(athlete.name || 'athlete')} avatar">
+         xmlns="http://www.w3.org/2000/svg" role="img" aria-label="${escapeAttr(athlete.name || 'athlete')} avatar">
       <g stroke="${stroke}" stroke-width="2.5" stroke-linecap="round" fill="none" filter="url(#roughen)">
         <!-- head -->
         <circle cx="50" cy="24" r="15" fill="#fff"/>

@@ -145,7 +145,13 @@
     </div>
   </div>
 
-  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <!-- Pinned + SRI so a tampered/compromised CDN can't inject code. To upgrade:
+       bump the version, recompute the hash from the SAME /dist/umd/supabase.js URL
+       (curl -sL <url> | openssl dgst -sha384 -binary | openssl base64 -A), update both. -->
+  <script
+    src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.107.0/dist/umd/supabase.js"
+    integrity="sha384-CQbEv3UOeYwlaBLdPF5KqEagCP39Q1KpvJC6Gwa3UGjZAwMvpA+0TFxSSnrgb4MX"
+    crossorigin="anonymous"></script>
   <script src="js/config.js"></script>
   <script src="js/achievements.js"></script>
   <script src="js/avatar.js"></script>
