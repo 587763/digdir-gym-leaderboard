@@ -37,9 +37,26 @@ create trigger athletes_touch_updated_at
   for each row execute function public.touch_updated_at();
 
 -- ---------------------------------------------------------------------------
--- Row Level Security
+-- Verified editors (org-gating)
+--   Rows here are created ONLY by the verify-editor Edge Function (service role),
+--   which checks GitHub `felleslosninger` membership. Being in this table is what
+--   grants write access below.
+-- ---------------------------------------------------------------------------
+create table if not exists public.editors (
+  user_id      uuid primary key references auth.users(id) on delete cascade,
+  github_login text,
+  verified_at  timestamptz not null default now()
+);
+alter table public.editors enable row level security;
+
+create policy "read own editor row" on public.editors
+  for select to authenticated using (user_id = auth.uid());
+-- No write policies => only the service role (the Edge Function) can modify editors.
+
+-- ---------------------------------------------------------------------------
+-- Row Level Security on athletes
 --   • anyone (even signed-out) can READ the board
---   • only signed-in (GitHub) users can add / edit / delete
+--   • only verified editors (felleslosninger members) can add / edit / delete
 -- ---------------------------------------------------------------------------
 alter table public.athletes enable row level security;
 
@@ -47,17 +64,18 @@ create policy "Public read access"
   on public.athletes for select
   using (true);
 
-create policy "Authenticated can insert"
-  on public.athletes for insert to authenticated
-  with check (true);
+create policy "Editors can insert" on public.athletes
+  for insert to authenticated
+  with check (exists (select 1 from public.editors e where e.user_id = auth.uid()));
 
-create policy "Authenticated can update"
-  on public.athletes for update to authenticated
-  using (true) with check (true);
+create policy "Editors can update" on public.athletes
+  for update to authenticated
+  using      (exists (select 1 from public.editors e where e.user_id = auth.uid()))
+  with check (exists (select 1 from public.editors e where e.user_id = auth.uid()));
 
-create policy "Authenticated can delete"
-  on public.athletes for delete to authenticated
-  using (true);
+create policy "Editors can delete" on public.athletes
+  for delete to authenticated
+  using (exists (select 1 from public.editors e where e.user_id = auth.uid()));
 
 -- ---------------------------------------------------------------------------
 -- Realtime — push live changes to every open board (e.g. the gym wall screen)

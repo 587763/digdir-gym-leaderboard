@@ -30,6 +30,12 @@
       return data.session?.user ?? null;
     },
 
+    async getSession() {
+      if (!client) return null;
+      const { data } = await client.auth.getSession();
+      return data.session ?? null;
+    },
+
     // Friendly display name for the signed-in user.
     userLabel(user) {
       if (!user) return '';
@@ -41,7 +47,11 @@
       if (!client) return;
       await client.auth.signInWithOAuth({
         provider: 'github',
-        options: { redirectTo: window.location.origin + window.location.pathname },
+        // read:org lets the verify-editor function check felleslosninger membership.
+        options: {
+          scopes: 'read:org',
+          redirectTo: window.location.origin + window.location.pathname,
+        },
       });
     },
 
@@ -50,9 +60,40 @@
       await client.auth.signOut();
     },
 
+    // Passes the full session so callers can read session.provider_token (only
+    // present right after a fresh OAuth sign-in, used to verify org membership).
     onAuthChange(cb) {
       if (!client) return;
-      client.auth.onAuthStateChange((_event, session) => cb(session?.user ?? null));
+      client.auth.onAuthStateChange((_event, session) => cb(session ?? null));
+    },
+
+    // --- editor (org membership) -------------------------------------------
+    // Server-verifies GitHub org membership and records the user as an editor.
+    // Returns true only if the Edge Function confirms active membership.
+    async verifyEditor(providerToken) {
+      if (!client) return false;
+      try {
+        const { data, error } = await client.functions.invoke('verify-editor', {
+          body: { provider_token: providerToken },
+        });
+        if (error) {
+          console.error('verify-editor failed', error);
+          return false;
+        }
+        return !!data?.editor;
+      } catch (e) {
+        console.error('verify-editor threw', e);
+        return false;
+      }
+    },
+
+    // Cheap check for return visits (no GitHub call): is there an editors row for
+    // me? Readable thanks to the "read own editor row" RLS policy.
+    async isEditorCached() {
+      if (!client) return false;
+      const { data, error } = await client.from('editors').select('user_id').maybeSingle();
+      if (error) return false;
+      return !!data;
     },
 
     // --- data ---------------------------------------------------------------

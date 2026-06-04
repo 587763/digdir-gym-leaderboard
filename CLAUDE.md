@@ -47,7 +47,10 @@ js/store.js          ALL Supabase access: data CRUD, auth, realtime. UI never ca
 js/app.js            UI controller (class LeaderboardApp, global `app`); rendering, modals, tabs
 js/avatar.js         window.renderAvatar(athlete, size) — stick figure derived from name
 js/achievements.js   window.ACHIEVEMENTS registry (extensible)
-supabase/schema.sql  table + RLS + realtime + seed; paste into Supabase SQL editor
+supabase/schema.sql  full DB state for a fresh install: tables + RLS + realtime + seed
+supabase/migrations/ incremental SQL to apply to the live DB (run manually in SQL editor)
+supabase/functions/verify-editor/  Edge Function: server-side GitHub org-membership check
+supabase/config.toml  Supabase CLI config (for deploying the function)
 .github/workflows/deploy.yml  Pages deploy on push to main
 .claude/launch.json  preview server config (used by the preview tooling)
 ```
@@ -101,20 +104,24 @@ with build type `workflow`; the workflow self-enables it (`configure-pages` with
 - **Threat model:** an internal, trust-based office board. The data is not secret
   (it's a public leaderboard). The main thing we protect against is anonymous
   drive-by vandalism.
-- **What's enforced:** RLS = public read, authenticated write. The publishable key
-  and the whole site are public; that's fine because the key only grants the `anon`
-  (read-only) role until a real GitHub login produces a signed JWT.
-- **Known residual risk (by design, for now):** "authenticated" means *any* GitHub
-  user on the internet, not just Digdir staff — so anyone willing to sign in with
-  GitHub can edit/delete rows. This was an accepted v1 tradeoff (org-gating was
-  deferred). To harden when desired, pick one:
-  - **Editor allowlist:** an `editors` table of allowed GitHub user ids; change the
-    write policies to `... using (auth.jwt()->>'sub' in (select github_id from editors))`.
-    Reliable, low effort, needs manual list upkeep.
-  - **Org gating:** a Supabase Edge Function that verifies `felleslosninger`
-    membership server-side. More work; depends on org OAuth-app policy.
+- **What's enforced (org-gating):** public read; writes require a row in the
+  `editors` table. That row is created **only** by the `verify-editor` Edge Function,
+  which checks GitHub `felleslosninger` membership server-side using the user's
+  `read:org`-scoped provider token. The client cannot fake editor status — RLS on
+  `athletes` checks `exists (select 1 from editors where user_id = auth.uid())`.
+  - Flow: sign in (requests `read:org`) → on the fresh session the frontend calls
+    `verify-editor` with `session.provider_token` → function verifies membership and
+    upserts/deletes the `editors` row → UI gates on `app.isEditor`, writes gate on RLS.
+  - Return visits have no provider token, so the frontend reads its own `editors`
+    row (allowed by the "read own editor row" policy) to know editor status.
+  - **Dependency:** this only works if `felleslosninger` permits the OAuth app to
+    read membership. If the function gets HTTP 403 from GitHub, an org owner must
+    approve the OAuth app (org "third-party application access" policy). HTTP 404 =
+    not a member. The function returns `github_status` to help debug.
   - Don't gate on email domain — GitHub emails are often private/noreply here
     ("allow users without email" is on).
+- **Changing the org:** edit `ORG` in `supabase/functions/verify-editor/index.ts`
+  (and the user-facing copy in `app.js` / this file), then redeploy the function.
 - **No secret key in the repo.** Only `sb_publishable_…` is committed. The
   `sb_secret_…` / service_role key bypasses RLS and must never appear in frontend
   code, config, or git history. (If one ever leaks, rotate it in the Supabase
@@ -154,6 +161,12 @@ These live outside git; a fresh session can't see them. Current config:
   via `gh api -X POST repos/<owner>/<repo>/pages -f build_type=workflow` using a token
   with `repo` scope. After that the workflow's `configure-pages` (`enablement: true`)
   manages it.
+- **verify-editor Edge Function** is deployed via the Supabase CLI (not the Pages
+  workflow). To (re)deploy: `supabase login` → `supabase link --project-ref
+  hqrqmkherwdkfvhjypuk` → `supabase functions deploy verify-editor`. It needs no
+  manual secrets (service role is auto-injected). The `read:org` scope is requested
+  client-side at sign-in, so the GitHub OAuth app needs no scope pre-registration —
+  but users must re-consent the first time after this shipped.
 - **Maintenance TODO:** the workflow's actions (`checkout@v4`, `configure-pages@v5`,
   `deploy-pages@v4`, `upload-pages-artifact@v3`) emit a Node 20 deprecation warning;
   bump them when convenient.

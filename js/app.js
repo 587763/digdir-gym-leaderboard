@@ -12,6 +12,7 @@ class LeaderboardApp {
   constructor() {
     this.athletes = [];
     this.user = null;
+    this.isEditor = false;
     this.editingId = null;
     this.activeTab = 'lifts';
     this.focusedLift = 'bench';
@@ -27,10 +28,13 @@ class LeaderboardApp {
     this.setupEventListeners();
 
     this.user = await window.Store.getUser();
-    window.Store.onAuthChange((user) => {
-      this.user = user;
+    this.isEditor = this.user ? await window.Store.isEditorCached() : false;
+    window.Store.onAuthChange(async (session) => {
+      this.user = session?.user ?? null;
+      this.isEditor = await this.resolveEditor(session);
       this.reflectAuth();
       this.render();
+      if (this.isManageOpen()) this.renderAthletesList();
     });
 
     try {
@@ -56,20 +60,32 @@ class LeaderboardApp {
   }
 
   // --- auth -----------------------------------------------------------------
+  // Determine editor status: fresh sign-in (provider_token present) => verify org
+  // membership at GitHub; otherwise fall back to the cached editors row.
+  async resolveEditor(session) {
+    if (!session?.user) return false;
+    if (session.provider_token) return window.Store.verifyEditor(session.provider_token);
+    return window.Store.isEditorCached();
+  }
+
   reflectAuth() {
     const signedIn = !!this.user;
     document.body.classList.toggle('signed-in', signedIn);
+    document.body.classList.toggle('can-edit', this.isEditor);
 
     const authArea = document.getElementById('authArea');
-    if (signedIn) {
-      authArea.innerHTML = `
-        <span class="auth-user">✍️ ${this.escapeHtml(window.Store.userLabel(this.user))}</span>
-        <button id="signOutBtn" class="btn btn-ghost">Sign out</button>`;
-      document.getElementById('signOutBtn').addEventListener('click', () => window.Store.signOut());
-    } else {
+    if (!signedIn) {
       authArea.innerHTML = `<button id="signInBtn" class="btn btn-primary">Sign in with GitHub to edit</button>`;
       document.getElementById('signInBtn').addEventListener('click', () => window.Store.signIn());
+      return;
     }
+
+    const label = this.escapeHtml(window.Store.userLabel(this.user));
+    const badge = this.isEditor
+      ? `<span class="auth-user">✍️ ${label}</span>`
+      : `<span class="auth-user view-only" title="Only felleslosninger members can edit">👀 ${label} · view only</span>`;
+    authArea.innerHTML = `${badge}<button id="signOutBtn" class="btn btn-ghost">Sign out</button>`;
+    document.getElementById('signOutBtn').addEventListener('click', () => window.Store.signOut());
   }
 
   // --- setup ----------------------------------------------------------------
@@ -123,7 +139,7 @@ class LeaderboardApp {
 
   // --- modals ---------------------------------------------------------------
   openModal(athleteId = null) {
-    if (!this.user) return this.showToast('Sign in to edit the board', 'error');
+    if (!this.isEditor) return this.showToast('Only felleslosninger members can edit', 'error');
     const form = document.getElementById('athleteForm');
     const title = document.getElementById('modalTitle');
     form.reset();
@@ -156,7 +172,7 @@ class LeaderboardApp {
   }
 
   openManageModal() {
-    if (!this.user) return this.showToast('Sign in to manage athletes', 'error');
+    if (!this.isEditor) return this.showToast('Only felleslosninger members can edit', 'error');
     document.getElementById('manageModal').style.display = 'block';
     this.renderAthletesList();
   }

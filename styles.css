@@ -91,9 +91,10 @@ header { margin-bottom: 28px; }
 
 .controls { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 22px; }
 
-/* Anything edit-only is hidden until signed in */
+/* Anything edit-only is hidden until the user is a verified editor */
 .edit-only { display: none; }
-body.signed-in .edit-only { display: inline-flex; }
+body.can-edit .edit-only { display: inline-flex; }
+.auth-user.view-only { color: var(--ink-soft); border-style: dashed; }
 
 /* ---- tabs ----------------------------------------------------------------- */
 .tab-navigation { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 24px; border-bottom: 3px dashed var(--line); padding-bottom: 8px; }
