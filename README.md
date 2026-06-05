@@ -47,6 +47,21 @@ Quick start:
 npm run dev      # http://localhost:3000  (or: python3 -m http.server 3000)
 ```
 
+## Backups
+
+The Supabase project is on the free tier, which has no reliable automatic backups (and
+idle free projects can be paused or deleted). A scheduled GitHub Actions workflow
+([`.github/workflows/backup.yml`](.github/workflows/backup.yml)) dumps the data daily and
+keeps each dump as a **workflow artifact for 90 days**; dumps are never committed to this
+public repo.
+
+It authenticates via the `SUPABASE_DB_URL` repository secret (the project's full Postgres
+connection string — full DB access, so it lives only in Actions secrets). If that secret
+is ever missing, the workflow fails fast with a message saying so.
+
+To restore: download a backup artifact, `gunzip` it, and load it into a (fresh) project
+with `psql "<target-connection-string>" -f leaderboard-backup-*.sql`.
+
 ## License
 
 MIT

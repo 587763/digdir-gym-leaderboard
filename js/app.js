@@ -134,7 +134,6 @@ class LeaderboardApp {
     document.getElementById('adminBtn').onclick = () => this.openAdmin();
     document.getElementById('manageAthletesBtn').onclick = () => this.openManage();
     document.getElementById('addNewAthleteBtn').onclick = () => { this.closeAll(); this.openAthleteModal(); };
-    document.getElementById('exportBtn').onclick = () => this.exportData();
 
     document.getElementById('athleteForm').addEventListener('submit', (e) => { e.preventDefault(); this.saveAthlete(); });
     document.getElementById('mineForm').addEventListener('submit', (e) => { e.preventDefault(); this.submitMine(); });
@@ -548,17 +547,6 @@ class LeaderboardApp {
   rankDisplay(rank) { return { 1: '🥇', 2: '🥈', 3: '🥉' }[rank] || rank; }
 
   // --- misc -----------------------------------------------------------------
-  exportData() {
-    const blob = new Blob([JSON.stringify(this.athletes, null, 2)], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = `leaderboard-backup-${new Date().toISOString().split('T')[0]}.json`;
-    link.click();
-    URL.revokeObjectURL(url);
-    this.showToast('Backup downloaded', 'success');
-  }
-
   showConfigBanner() {
     const banner = document.createElement('div');
     banner.className = 'config-banner';

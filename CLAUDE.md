@@ -28,6 +28,7 @@ js/achievements.js   ACHIEVEMENTS registry (extensible)
 supabase/schema.sql  canonical fresh-install DB (tables + RLS + functions + seed)
 supabase/migrations/ hand-applied SQL for the live DB (0001 SUPERSEDED; 0002 = current model)
 .github/workflows/deploy.yml  Pages deploy on push to main
+.github/workflows/backup.yml  daily DB dump → 90-day artifact (needs SUPABASE_DB_URL secret)
 .claude/launch.json  preview server "leaderboard"
 ```
 
@@ -56,6 +57,15 @@ Mock without a DB: `app.athletes=[...]; app.render()`.
 
 ## Deploy
 Push to `main` → Pages workflow auto-deploys (~1 min). Commit/push only when the user asks.
+
+## Backups (free-tier has none)
+`.github/workflows/backup.yml` runs daily (cron 03:17 UTC) + on manual dispatch: `pg_dump`s
+`public.{athletes,profiles,proposals}` and uploads a gzipped `.sql` as a 90-day workflow artifact.
+Dumps are NEVER committed (public repo). Requires repo secret **`SUPABASE_DB_URL`** (full Postgres
+URI, Supabase → Project Settings → Database → Connection string) — a human adds it under
+Settings → Secrets and variables → Actions; the run errors with a clear message until it's set.
+Restore: download the artifact, `gunzip`, then `psql "<target-db-url>" -f leaderboard-backup-*.sql`
+(into a fresh project; the dump has no owner/privilege statements).
 
 ## Supabase / secrets
 - `js/config.js` = project URL + **publishable** key (`sb_publishable_…`), safe to commit (RLS protects).
