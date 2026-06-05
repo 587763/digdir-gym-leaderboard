@@ -62,7 +62,7 @@ jobs:
           echo "DUMP_FILE=${OUT}.gz" >> "$GITHUB_ENV"
 
       - name: Upload backup artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: ${{ env.DUMP_FILE }}
           path: ${{ env.DUMP_FILE }}
