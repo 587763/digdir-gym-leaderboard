@@ -192,6 +192,7 @@ class LeaderboardApp {
     if (this.isOpen('reviewModal')) this.renderReview();
     if (this.isOpen('adminModal')) this.renderUsers();
     if (this.isOpen('manageModal')) this.renderAthletesList();
+    if (this.isOpen('historyModal')) this.reloadHistory();
   }
 
   // --- lookups --------------------------------------------------------------
@@ -556,7 +557,7 @@ class LeaderboardApp {
       const rank = startRank + i;
       return `<tr>
         <td><span class="rank">${this.rankDisplay(rank)}</span></td>
-        <td><span class="athlete-name">${this.escapeHtml(a.name)}</span>${this.badgesFor(a)}${this.pendingForAthlete(a.id) ? '<span class="badge-chip pending" title="Has a pending change">⏳</span>' : ''}</td>
+        <td><button type="button" class="athlete-name athlete-link" onclick="app.openHistory('${a.id}')" title="See progression">${this.escapeHtml(a.name)}</button>${this.badgesFor(a)}${this.pendingForAthlete(a.id) ? '<span class="badge-chip pending" title="Has a pending change">⏳</span>' : ''}</td>
         <td><span class="pr-value">${this.displayValue(liftType, this.valueFor(a, liftType))}</span></td>
       </tr>`;
     }).join('');
@@ -577,7 +578,7 @@ class LeaderboardApp {
         <div class="podium-athlete">
           <div class="podium-avatar">${window.renderAvatar(athlete, 84)}</div>
           <div class="podium-medal">${medals[i]}</div>
-          <div class="podium-name">${this.escapeHtml(athlete.name)}</div>
+          <div class="podium-name"><button type="button" class="athlete-link" onclick="app.openHistory('${athlete.id}')" title="See progression">${this.escapeHtml(athlete.name)}</button></div>
           <div class="podium-value">${this.displayValueUnit(liftType, this.valueFor(athlete, liftType))}</div>
         </div>
         <div class="podium-stand"><div class="podium-rank">${ranks[i]}</div></div>`;
@@ -603,6 +604,106 @@ class LeaderboardApp {
       .map((x) => `<span class="badge-chip" title="${this.escapeHtml(x.name)}">${x.emoji}</span>`).join('');
   }
   rankDisplay(rank) { return { 1: '🥇', 2: '🥈', 3: '🥉' }[rank] || rank; }
+
+  // --- history / progression ------------------------------------------------
+  // Verified PRs are stored as approved 'pr' proposals (payload.lift/value, decided_at).
+  // This view groups them per lift and draws a hand-rolled SVG sparkline — no chart lib.
+  openHistory(athleteId) {
+    const a = this.athleteById(athleteId);
+    if (!a) return;
+    this.historyAthleteId = athleteId;
+    document.getElementById('historyTitle').textContent = `📈 ${a.name} — progression`;
+    document.getElementById('historyBody').innerHTML = '<p class="empty-state">Loading…</p>';
+    this.openModal('historyModal');
+    this.reloadHistory();
+  }
+
+  async reloadHistory() {
+    const id = this.historyAthleteId;
+    const a = this.athleteById(id);
+    const body = document.getElementById('historyBody');
+    if (!a || !body) return;
+    try {
+      const rows = await window.Store.listAthleteHistory(id);
+      // Bail if the user switched/closed the modal while we were fetching.
+      if (this.historyAthleteId !== id || !this.isOpen('historyModal')) return;
+      this.renderHistory(rows);
+    } catch (e) {
+      body.innerHTML = `<p class="empty-state">${this.escapeHtml(this.errText(e))}</p>`;
+    }
+  }
+
+  renderHistory(rows) {
+    const body = document.getElementById('historyBody');
+    const byLift = new Map();
+    for (const r of rows) {
+      const lift = r.payload?.lift;
+      if (!lift) continue;
+      if (!byLift.has(lift)) byLift.set(lift, []);
+      byLift.get(lift).push({ value: Number(r.payload.value), at: r.decided_at });
+    }
+    if (byLift.size === 0) {
+      body.innerHTML = '<p class="empty-state">No verified PRs yet — progression shows up here once PRs are peer-verified.</p>';
+      return;
+    }
+    // Main lifts first, then "other lifts", in their registry order; unknowns last.
+    const order = [...LIFTS, ...window.OTHER_LIFTS.map((l) => l.id)];
+    const liftIds = [...byLift.keys()].sort((x, y) => {
+      const ix = order.indexOf(x), iy = order.indexOf(y);
+      return (ix < 0 ? 99 : ix) - (iy < 0 ? 99 : iy);
+    });
+    body.innerHTML = liftIds.map((lid) => this.renderHistoryLift(lid, byLift.get(lid))).join('');
+  }
+
+  renderHistoryLift(lid, series) {
+    const meta = LIFT_META[lid] || window.getOtherLift(lid) || { emoji: '', label: lid };
+    const first = series[0].value;
+    const last = series[series.length - 1].value;
+    const delta = last - first;
+    const head = series.length === 1
+      ? '<span class="history-delta first">first PR</span>'
+      : `<span class="history-delta ${delta >= 0 ? 'up' : 'down'}">${this.displaySignedDelta(lid, delta)}</span>`;
+    const points = series.map((p) =>
+      `<li><span class="hist-date">${this.formatDate(p.at)}</span><span class="hist-val">${this.escapeHtml(this.displayValueUnit(lid, p.value))}</span></li>`
+    ).join('');
+    return `<div class="history-lift">
+      <div class="history-lift-head">
+        <h3>${meta.emoji} ${this.escapeHtml(meta.label)}</h3>
+        ${head}
+      </div>
+      ${this.sparkline(lid, series)}
+      <ul class="history-points">${points}</ul>
+    </div>`;
+  }
+
+  // Hand-rolled inline SVG line chart. Uniform scaling (no preserveAspectRatio
+  // tricks) so dots stay round; #squiggle gives it the whiteboard look.
+  sparkline(lid, series) {
+    const W = 320, H = 90, pad = 12;
+    const vals = series.map((s) => s.value);
+    const min = Math.min(...vals), max = Math.max(...vals);
+    const n = series.length;
+    const x = (i) => n === 1 ? W / 2 : pad + (i / (n - 1)) * (W - 2 * pad);
+    const y = (v) => max === min ? H / 2 : H - pad - ((v - min) / (max - min)) * (H - 2 * pad);
+    const dot = (s, i) => `<circle cx="${x(i).toFixed(1)}" cy="${y(s.value).toFixed(1)}" r="4"><title>${this.escapeHtml(this.formatDate(s.at) + ': ' + this.displayValueUnit(lid, s.value))}</title></circle>`;
+    const dots = series.map(dot).join('');
+    const line = n > 1
+      ? `<polyline class="spark-line" points="${series.map((s, i) => `${x(i).toFixed(1)},${y(s.value).toFixed(1)}`).join(' ')}" filter="url(#squiggle)"/>`
+      : '';
+    return `<svg class="sparkline" viewBox="0 0 ${W} ${H}" role="img" aria-label="Progression chart">${line}${dots}</svg>`;
+  }
+
+  // Signed change for the lift's unit ("+12.5 kg" / "−0:08" for time lifts).
+  displaySignedDelta(lid, delta) {
+    const sign = delta > 0 ? '+' : delta < 0 ? '−' : '';
+    const mag = Math.abs(delta);
+    return this.liftUnit(lid) === 'time' ? `${sign}${window.formatLiftTime(mag)}` : `${sign}${mag.toFixed(1)} kg`;
+  }
+
+  formatDate(iso) {
+    if (!iso) return '';
+    return new Date(iso).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' });
+  }
 
   // --- misc -----------------------------------------------------------------
   showConfigBanner() {

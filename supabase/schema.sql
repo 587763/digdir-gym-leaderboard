@@ -107,6 +107,9 @@ create policy "profiles readable by authenticated" on public.profiles for select
 create policy "admins manage profiles" on public.profiles for update to authenticated using (public.is_admin()) with check (public.is_admin());
 
 create policy "proposals readable by authenticated" on public.proposals for select to authenticated using (true);
+-- Approved PRs are public so the progression charts work for signed-out visitors.
+-- Narrow on purpose; pending/rejected and other kinds stay member-only (policies OR).
+create policy "approved PRs are public history" on public.proposals for select using (status = 'approved' and kind = 'pr');
 
 -- ───────────────────────────────────────────────────────────────────────────
 -- Governed write paths

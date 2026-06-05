@@ -89,6 +89,21 @@
       return data;
     },
 
+    // An athlete's verified PR history (approved 'pr' proposals), oldest → newest.
+    // The progression view reads this. Authenticated only (RLS gates proposals reads).
+    async listAthleteHistory(athleteId) {
+      if (!client) return [];
+      const { data, error } = await client
+        .from('proposals')
+        .select('payload, decided_at')
+        .eq('athlete_id', athleteId)
+        .eq('kind', 'pr')
+        .eq('status', 'approved')
+        .order('decided_at', { ascending: true });
+      if (error) throw error;
+      return data;
+    },
+
     // --- governed writes (RPCs enforce all the rules) -----------------------
     async propose(kind, athleteId, payload) {
       const { data, error } = await client.rpc('propose', {

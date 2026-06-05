@@ -28,7 +28,7 @@ js/avatar.js         renderAvatar(athlete, size) — stick figure from name
 js/achievements.js   ACHIEVEMENTS registry (extensible)
 js/lifts.js          OTHER_LIFTS registry (extra non-main lifts: id/label/emoji/unit kg|time) + time fmt
 supabase/schema.sql  canonical fresh-install DB (tables + RLS + functions + seed)
-supabase/migrations/ hand-applied SQL for the live DB (0001 SUPERSEDED; 0002 = governance; 0003 = other lifts)
+supabase/migrations/ hand-applied SQL for the live DB (0001 SUPERSEDED; 0002 = governance; 0003 = other lifts; 0004 = public PR history)
 .github/workflows/deploy.yml  Pages deploy on push to main
 .github/workflows/backup.yml  daily DB dump → 90-day artifact (needs SUPABASE_DB_URL secret)
 .claude/launch.json  preview server "leaderboard"
@@ -39,7 +39,13 @@ supabase/migrations/ hand-applied SQL for the live DB (0001 SUPERSEDED; 0002 = g
   lifts jsonb (`{lift_id: value}` map for "other lifts" — see js/lifts.js, no per-lift column),
   achievements text[], avatar jsonb (reserved), timestamps.
 - `profiles` — per GitHub user: user_id, github_login, is_admin, status (pending|active|blocked), athlete_id (unique link).
-- `proposals` — pending queue + verified history: kind (claim|new_athlete|rename|pr|achievement), approval (admin|peer), athlete_id, proposer, payload jsonb, status, decided_by.
+- `proposals` — pending queue + verified history: kind (claim|new_athlete|rename|pr|achievement), approval (admin|peer), athlete_id, proposer, payload jsonb, status, decided_by, decided_at.
+  - Approved `pr` rows ARE the progression history. Tapping an athlete name opens the history
+    modal (`app.openHistory`): `Store.listAthleteHistory` fetches approved `pr` proposals
+    ordered by `decided_at`, grouped per lift, drawn as a hand-rolled inline SVG sparkline
+    (`app.sparkline`, no chart lib; time lifts shown mm:ss). Public read: migration 0004
+    adds an RLS policy exposing approved `pr` proposals to anon (the rest of the table
+    stays member-only), so progression works for signed-out visitors too.
 
 ## Governance (RLS + propose()/decide() SECURITY DEFINER functions)
 - Read: public. Admin (`is_admin`): writes athletes directly, decides admin-proposals, manages profiles.
@@ -75,14 +81,23 @@ Restore: download the artifact, `gunzip`, then `psql "<target-db-url>" -f leader
 - `js/config.js` = project URL + **publishable** key (`sb_publishable_…`), safe to commit (RLS protects).
   NEVER commit the `sb_secret_…`/service_role key.
 - Project ref `hqrqmkherwdkfvhjypuk`. Data-model change = edit schema.sql AND add a numbered migration file.
-- Applying a migration to the live DB: if you're running locally with the project's DB connection
-  string available (the `SUPABASE_DB_URL` secret, or Supabase → Settings → Database → Connection string)
-  and you judge the change safe, apply the new file yourself:
-  `psql "$SUPABASE_DB_URL" -f supabase/migrations/000N_*.sql`. Do NOT use `supabase db push` — our
-  hand-numbered files aren't in the CLI ledger, so it would replay the superseded 0001. Migrations are
-  written idempotent (`if [not] exists`), so re-running is safe. If you have no DB creds (e.g. a sandboxed
-  run), tell the user to paste the file into the Supabase SQL editor at deploy time — that's the correct
-  fallback, not a failure.
+- Applying a migration to the live DB (when you judge the change safe):
+  - **DB URL**: lives in `.env` at the repo root (gitignored). Format is `SUPABASE_DB_URL = postgres…`
+    **with spaces around `=`**, so `source .env` / `. ./.env` FAILS (`command not found: SUPABASE_DB_URL`).
+    Parse it instead:
+    `DBURL=$(grep -E '^[[:space:]]*SUPABASE_DB_URL[[:space:]]*=' .env | sed -E 's/^[^=]*=[[:space:]]*//; s/[[:space:]]*$//')`.
+    Never echo the value. (Also available as the same-named GitHub Actions secret.)
+  - **Tool**: there is NO local `psql`/`pg_dump`. Use the installed `supabase` CLI's direct-query path,
+    which bypasses the migration ledger: `supabase db query --db-url "$DBURL" -f supabase/migrations/000N_*.sql`.
+    Do NOT use `supabase db push` — our hand-numbered files aren't in the CLI ledger, so it would replay
+    the superseded 0001.
+  - **Gotcha**: `db query -f <file>` sends the whole file as ONE prepared statement → fails with
+    `cannot insert multiple commands into a prepared statement` if the file has >1 statement. For a
+    multi-statement migration, run each statement as its own `supabase db query "<sql>"` call
+    (or wrap the body in a single `do $$ … $$;` block).
+  - Migrations are written idempotent (`if [not] exists`, or `drop policy if exists` before `create policy`),
+    so re-running is safe. If you have no DB creds (e.g. a sandboxed run), tell the user to paste the file
+    into the Supabase SQL editor at deploy time — that's the correct fallback, not a failure.
 - New serving origin → add it in Supabase → Auth → URL Configuration (Site URL + Redirect URLs
   `https://…/**`) or sign-in breaks. Currently allows localhost:3000 + the Pages URL.
 - supabase-js is pinned + SRI'd in index.html. Upgrade: bump version, recompute
