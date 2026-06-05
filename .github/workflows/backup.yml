@@ -37,9 +37,10 @@ jobs:
           fi
 
       - name: Install PostgreSQL 17 client
-        # pg_dump refuses to dump a server newer than itself, and Ubuntu's default
-        # client lags Supabase's server. Install the matching major (17) from PGDG;
-        # the postgresql-common wrapper on PATH then auto-selects the newest installed.
+        # pg_dump refuses to dump a server newer than itself, and the runner's
+        # preinstalled client (16) lags Supabase's server (17). Install the matching
+        # major from PGDG and call its binary by explicit path (the PATH `pg_dump`
+        # wrapper resolves to the older preinstalled version).
         run: |
           sudo sh -c 'echo "deb http://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" > /etc/apt/sources.list.d/pgdg.list'
           curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc | sudo gpg --dearmor -o /etc/apt/trusted.gpg.d/pgdg.gpg
@@ -52,7 +53,7 @@ jobs:
         run: |
           STAMP="$(date -u +%Y%m%dT%H%M%SZ)"
           OUT="leaderboard-backup-${STAMP}.sql"
-          pg_dump "$SUPABASE_DB_URL" \
+          /usr/lib/postgresql/17/bin/pg_dump "$SUPABASE_DB_URL" \
             --no-owner --no-privileges \
             -t public.athletes -t public.profiles -t public.proposals \
             -f "$OUT"
