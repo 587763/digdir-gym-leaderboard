@@ -21,7 +21,6 @@ class LeaderboardApp {
     this.editingId = null;
     this.mineSnapshot = null;
     this.activeTab = 'lifts';
-    this.focusedLift = 'bench';
     this.init();
   }
 
@@ -37,6 +36,9 @@ class LeaderboardApp {
 
     this.buildAchievementFields('achievementFields');
     this.buildAchievementFields('mineAchievementFields');
+    this.buildOtherLiftSections();
+    this.buildOtherLiftFields('mineOtherLiftFields', 'mineOther_', true, false);
+    this.buildOtherLiftFields('adminOtherLiftFields', 'adminOther_', false, true);
     this.setupEventListeners();
 
     await this.loadIdentity();
@@ -120,6 +122,35 @@ class LeaderboardApp {
     document.getElementById(containerId).innerHTML = window.ACHIEVEMENTS.map(
       (a) => `<label class="form-check"><input type="checkbox" class="${cls}" value="${a.id}"><span>${a.emoji} ${this.escapeHtml(a.name)}</span></label>`
     ).join('');
+  }
+
+  // One leaderboard section per "other lift" (js/lifts.js); first one focused by default.
+  buildOtherLiftSections() {
+    const root = document.getElementById('otherLiftsBoards');
+    if (!root) return;
+    if (window.OTHER_LIFTS.length === 0) {
+      root.innerHTML = '<p class="empty-state">No other lifts configured yet.</p>';
+      return;
+    }
+    root.innerHTML = window.OTHER_LIFTS.map((l, i) => {
+      const head = l.unit === 'time' ? 'Time (m:ss)' : 'PR (kg)';
+      return `<div class="leaderboard-section${i === 0 ? ' focused' : ''}" data-lift="${l.id}">
+        <h2 class="lift-header" data-lift="${l.id}">${l.emoji} ${this.escapeHtml(l.label)}</h2>
+        <table class="leaderboard-table" id="${l.id}Table"><thead><tr><th>Rank</th><th>Name</th><th>${head}</th></tr></thead><tbody></tbody></table>
+      </div>`;
+    }).join('');
+  }
+
+  // Number inputs for the "other lifts", reused by the My-PRs (peer) and admin forms.
+  buildOtherLiftFields(containerId, prefix, peer, zero) {
+    const el = document.getElementById(containerId);
+    if (!el) return;
+    el.innerHTML = window.OTHER_LIFTS.map((l) => {
+      const unit = l.unit === 'time' ? 'sec' : 'kg';
+      const step = l.unit === 'time' ? '1' : '0.5';
+      const tag = peer ? ' <span class="tag tag-peer">peer verify</span>' : '';
+      return `<div class="form-group"><label for="${prefix}${l.id}">${l.emoji} ${this.escapeHtml(l.label)} (${unit})${tag}</label><input type="number" id="${prefix}${l.id}" step="${step}" min="0"${zero ? ' value="0"' : ''}></div>`;
+    }).join('');
   }
 
   setupEventListeners() {
@@ -222,9 +253,10 @@ class LeaderboardApp {
     document.getElementById('mineSquat').value = a.squat;
     document.getElementById('mineBench').value = a.bench;
     document.getElementById('mineDeadlift').value = a.deadlift;
+    for (const l of window.OTHER_LIFTS) document.getElementById('mineOther_' + l.id).value = a.lifts?.[l.id] ?? 0;
     const earned = a.achievements || [];
     document.querySelectorAll('.mine-achievement-check').forEach((c) => (c.checked = earned.includes(c.value)));
-    this.mineSnapshot = { name: a.name, squat: a.squat, bench: a.bench, deadlift: a.deadlift, achievements: [...earned] };
+    this.mineSnapshot = { name: a.name, squat: a.squat, bench: a.bench, deadlift: a.deadlift, lifts: { ...(a.lifts || {}) }, achievements: [...earned] };
     this.openModal('mineModal');
   }
 
@@ -239,6 +271,10 @@ class LeaderboardApp {
     for (const lift of LIFTS) {
       const v = num('mine' + lift.charAt(0).toUpperCase() + lift.slice(1));
       if (v !== Number(snap[lift])) proposals.push(['pr', { lift, value: v }]);
+    }
+    for (const l of window.OTHER_LIFTS) {
+      const v = num('mineOther_' + l.id);
+      if (v !== Number(snap.lifts?.[l.id] ?? 0)) proposals.push(['pr', { lift: l.id, value: v }]);
     }
     const checked = [...document.querySelectorAll('.mine-achievement-check')].filter((c) => c.checked).map((c) => c.value);
     for (const id of checked) if (!snap.achievements.includes(id)) proposals.push(['achievement', { achievement_id: id, op: 'add' }]);
@@ -272,7 +308,7 @@ class LeaderboardApp {
     const tag = p.approval === 'peer' ? '<span class="tag tag-peer">peer</span>' : '<span class="tag tag-admin">admin</span>';
     let text;
     switch (p.kind) {
-      case 'pr': text = `<strong>${aName}</strong>: ${LIFT_META[p.payload.lift]?.emoji || ''} ${this.escapeHtml(p.payload.lift)} → <strong>${this.escapeHtml(String(p.payload.value))} kg</strong>`; break;
+      case 'pr': { const lid = p.payload.lift; const meta = LIFT_META[lid] || window.getOtherLift(lid); text = `<strong>${aName}</strong>: ${meta?.emoji || ''} ${this.escapeHtml(meta?.label || lid)} → <strong>${this.escapeHtml(this.displayValueUnit(lid, p.payload.value))}</strong>`; break; }
       case 'achievement': { const ach = window.getAchievement(p.payload.achievement_id); text = `<strong>${aName}</strong>: ${p.payload.op === 'add' ? 'earn' : 'remove'} ${ach ? ach.emoji + ' ' + this.escapeHtml(ach.name) : this.escapeHtml(p.payload.achievement_id)}`; break; }
       case 'rename': text = `Rename to <strong>${this.escapeHtml(p.payload.name)}</strong>`; break;
       case 'new_athlete': text = `${who} wants to add athlete <strong>${this.escapeHtml(p.payload.name)}</strong>`; break;
@@ -377,6 +413,7 @@ class LeaderboardApp {
       document.getElementById('bench').value = a.bench;
       document.getElementById('squat').value = a.squat;
       document.getElementById('deadlift').value = a.deadlift;
+      for (const l of window.OTHER_LIFTS) document.getElementById('adminOther_' + l.id).value = a.lifts?.[l.id] ?? 0;
       document.querySelectorAll('#achievementFields .achievement-check').forEach((c) => (c.checked = (a.achievements || []).includes(c.value)));
       this.editingId = athleteId;
     } else {
@@ -396,9 +433,12 @@ class LeaderboardApp {
 
   async saveAthlete() {
     const num = (id) => Math.max(0, parseFloat(document.getElementById(id).value) || 0);
+    const lifts = {};
+    for (const l of window.OTHER_LIFTS) lifts[l.id] = num('adminOther_' + l.id);
     const data = {
       name: document.getElementById('athleteName').value.trim(),
       bench: num('bench'), squat: num('squat'), deadlift: num('deadlift'),
+      lifts,
       achievements: [...document.querySelectorAll('#achievementFields .achievement-check')].filter((c) => c.checked).map((c) => c.value),
     };
     if (!data.name) return this.showToast('Please enter a name', 'error');
@@ -436,6 +476,7 @@ class LeaderboardApp {
             <span>🦵 <strong>${a.squat.toFixed(1)}</strong></span>
             <span>💀 <strong>${a.deadlift.toFixed(1)}</strong></span>
             <span>🏆 <strong>${(a.bench + a.squat + a.deadlift).toFixed(1)}</strong></span>
+            ${window.OTHER_LIFTS.map((l) => `<span>${l.emoji} <strong>${this.displayValue(l.id, this.valueFor(a, l.id))}</strong></span>`).join('')}
           </div>
         </div>
         <div class="athlete-card-actions">
@@ -453,21 +494,38 @@ class LeaderboardApp {
     document.querySelectorAll('.tab-content').forEach((c) => c.classList.remove('active'));
     document.getElementById(`${tabName}-tab`).classList.add('active');
   }
+  // Spotlight a lift (podium) within its own tab — works for main and other lifts.
   focusLift(liftType) {
-    this.focusedLift = liftType;
-    const tab = document.getElementById('lifts-tab');
-    tab.querySelectorAll('.leaderboard-section').forEach((s) => s.classList.remove('focused'));
-    tab.querySelector(`[data-lift="${liftType}"]`)?.classList.add('focused');
+    const section = document.querySelector(`.leaderboard-section[data-lift="${liftType}"]`);
+    if (!section) return;
+    const group = section.closest('.leaderboards');
+    group.querySelectorAll('.leaderboard-section').forEach((s) => s.classList.remove('focused'));
+    section.classList.add('focused');
     this.render();
   }
 
-  // --- board rendering (unchanged core) ------------------------------------
-  valueFor(a, lift) { return lift === 'total' ? a.bench + a.squat + a.deadlift : a[lift]; }
+  // --- board rendering ------------------------------------------------------
+  // lift may be a main lift, 'total', or an "other lift" id (value in athletes.lifts).
+  valueFor(a, lift) {
+    if (lift === 'total') return a.bench + a.squat + a.deadlift;
+    if (window.getOtherLift(lift)) return Number(a.lifts?.[lift] ?? 0);
+    return a[lift];
+  }
+  // Sorts descending, so for time lifts (seconds) a LONGER hang ranks higher.
   sorted(lift) { return [...this.athletes].sort((a, b) => this.valueFor(b, lift) - this.valueFor(a, lift)); }
+
+  liftUnit(lift) { return window.getOtherLift(lift)?.unit || 'kg'; }
+  displayValue(lift, value) {
+    return this.liftUnit(lift) === 'time' ? window.formatLiftTime(value) : Number(value).toFixed(1);
+  }
+  displayValueUnit(lift, value) {
+    return this.liftUnit(lift) === 'time' ? this.displayValue(lift, value) : `${this.displayValue(lift, value)} kg`;
+  }
 
   render() {
     LIFTS.forEach((l) => this.renderLeaderboard(l));
     this.renderLeaderboard('total');
+    window.OTHER_LIFTS.forEach((l) => this.renderLeaderboard(l.id));
     this.renderHallOfFame();
     this.updateReviewCount();
   }
@@ -482,7 +540,7 @@ class LeaderboardApp {
   renderLeaderboard(liftType) {
     const section = document.querySelector(`#${liftType}Table`).closest('.leaderboard-section');
     const tbody = section.querySelector('tbody');
-    const ranked = this.sorted(liftType).filter((a) => liftType === 'total' || a[liftType] > 0);
+    const ranked = this.sorted(liftType).filter((a) => liftType === 'total' || this.valueFor(a, liftType) > 0);
     section.querySelector('.podium-container')?.remove();
 
     if (ranked.length === 0) {
@@ -499,7 +557,7 @@ class LeaderboardApp {
       return `<tr>
         <td><span class="rank">${this.rankDisplay(rank)}</span></td>
         <td><span class="athlete-name">${this.escapeHtml(a.name)}</span>${this.badgesFor(a)}${this.pendingForAthlete(a.id) ? '<span class="badge-chip pending" title="Has a pending change">⏳</span>' : ''}</td>
-        <td><span class="pr-value">${this.valueFor(a, liftType).toFixed(1)}</span></td>
+        <td><span class="pr-value">${this.displayValue(liftType, this.valueFor(a, liftType))}</span></td>
       </tr>`;
     }).join('');
   }
@@ -520,7 +578,7 @@ class LeaderboardApp {
           <div class="podium-avatar">${window.renderAvatar(athlete, 84)}</div>
           <div class="podium-medal">${medals[i]}</div>
           <div class="podium-name">${this.escapeHtml(athlete.name)}</div>
-          <div class="podium-value">${this.valueFor(athlete, liftType).toFixed(1)} kg</div>
+          <div class="podium-value">${this.displayValueUnit(liftType, this.valueFor(athlete, liftType))}</div>
         </div>
         <div class="podium-stand"><div class="podium-rank">${ranks[i]}</div></div>`;
       container.appendChild(spot);

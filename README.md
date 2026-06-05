@@ -1,8 +1,9 @@
 # 💪 Digdir Gym Leaderboard
 
 A digital version of our office gym whiteboard — squat / bench / deadlift personal
-records, a combined total, podiums, and a Hall of Fame for fun achievements. Hand-drawn
-whiteboard look; the board updates live across everyone's screens.
+records, a combined total, podiums, "other lifts" (e.g. a timed dead hang), and a Hall of
+Fame for fun achievements. Hand-drawn whiteboard look; the board updates live across
+everyone's screens.
 
 **Live:** https://587763.github.io/digdir-gym-leaderboard/
 

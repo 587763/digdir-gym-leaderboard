@@ -7,8 +7,9 @@ Live: https://587763.github.io/digdir-gym-leaderboard/ · Repo: `587763/digdir-g
 ## Non-negotiables
 - No build step, no backend, no framework, no npm runtime deps. Repo root deploys to
   Pages as-is. `supabase-js` is a CDN `<script>` (global `window.supabase`).
-- Vanilla JS. Script load order in index.html: config → achievements → avatar → store → app.
-  Intentional globals: `LEADERBOARD_CONFIG`, `ACHIEVEMENTS`, `renderAvatar`, `Store`, `app`.
+- Vanilla JS. Script load order in index.html: config → achievements → lifts → avatar → store → app.
+  Intentional globals: `LEADERBOARD_CONFIG`, `ACHIEVEMENTS`, `OTHER_LIFTS`/`getOtherLift`/`formatLiftTime`,
+  `renderAvatar`, `Store`, `app`.
 - Authorization is enforced in Postgres (RLS + functions), never the client. UI gating is cosmetic.
 
 ## After any change (keep it lean)
@@ -25,15 +26,18 @@ js/store.js          ALL Supabase access (data/auth/realtime/RPCs); UI never cal
 js/app.js            UI controller (class LeaderboardApp, global `app`)
 js/avatar.js         renderAvatar(athlete, size) — stick figure from name
 js/achievements.js   ACHIEVEMENTS registry (extensible)
+js/lifts.js          OTHER_LIFTS registry (extra non-main lifts: id/label/emoji/unit kg|time) + time fmt
 supabase/schema.sql  canonical fresh-install DB (tables + RLS + functions + seed)
-supabase/migrations/ hand-applied SQL for the live DB (0001 SUPERSEDED; 0002 = current model)
+supabase/migrations/ hand-applied SQL for the live DB (0001 SUPERSEDED; 0002 = governance; 0003 = other lifts)
 .github/workflows/deploy.yml  Pages deploy on push to main
 .github/workflows/backup.yml  daily DB dump → 90-day artifact (needs SUPABASE_DB_URL secret)
 .claude/launch.json  preview server "leaderboard"
 ```
 
 ## Data model
-- `athletes` — board (verified/displayed): name, bench/squat/deadlift, achievements text[], avatar jsonb (reserved), timestamps.
+- `athletes` — board (verified/displayed): name, bench/squat/deadlift (fixed main-lift columns, kg),
+  lifts jsonb (`{lift_id: value}` map for "other lifts" — see js/lifts.js, no per-lift column),
+  achievements text[], avatar jsonb (reserved), timestamps.
 - `profiles` — per GitHub user: user_id, github_login, is_admin, status (pending|active|blocked), athlete_id (unique link).
 - `proposals` — pending queue + verified history: kind (claim|new_athlete|rename|pr|achievement), approval (admin|peer), athlete_id, proposer, payload jsonb, status, decided_by.
 
@@ -70,8 +74,15 @@ Restore: download the artifact, `gunzip`, then `psql "<target-db-url>" -f leader
 ## Supabase / secrets
 - `js/config.js` = project URL + **publishable** key (`sb_publishable_…`), safe to commit (RLS protects).
   NEVER commit the `sb_secret_…`/service_role key.
-- Project ref `hqrqmkherwdkfvhjypuk`. Data-model change = edit schema.sql AND add a migration file
-  (humans run migrations by hand in the SQL editor; no runner).
+- Project ref `hqrqmkherwdkfvhjypuk`. Data-model change = edit schema.sql AND add a numbered migration file.
+- Applying a migration to the live DB: if you're running locally with the project's DB connection
+  string available (the `SUPABASE_DB_URL` secret, or Supabase → Settings → Database → Connection string)
+  and you judge the change safe, apply the new file yourself:
+  `psql "$SUPABASE_DB_URL" -f supabase/migrations/000N_*.sql`. Do NOT use `supabase db push` — our
+  hand-numbered files aren't in the CLI ledger, so it would replay the superseded 0001. Migrations are
+  written idempotent (`if [not] exists`), so re-running is safe. If you have no DB creds (e.g. a sandboxed
+  run), tell the user to paste the file into the Supabase SQL editor at deploy time — that's the correct
+  fallback, not a failure.
 - New serving origin → add it in Supabase → Auth → URL Configuration (Site URL + Redirect URLs
   `https://…/**`) or sign-in breaks. Currently allows localhost:3000 + the Pages URL.
 - supabase-js is pinned + SRI'd in index.html. Upgrade: bump version, recompute
@@ -88,6 +99,10 @@ Restore: download the artifact, `gunzip`, then `psql "<target-db-url>" -f leader
 
 ## Common tasks
 - Add achievement: one entry in `js/achievements.js` (form, badges, Hall of Fame all read `ACHIEVEMENTS`).
-- Add a lift: DB (athletes column in schema.sql + migration; `decide()` pr branch) and frontend
-  (`LIFTS`/`LIFT_META`, admin form + My-PRs form in index.html + their logic, a leaderboard section).
+- Add an "other lift" (the easy path, e.g. a time-based one): one entry in `js/lifts.js` — the
+  Other-Lifts tab section, the My-PRs + admin form fields, and the `decide()` jsonb branch all
+  handle it generically. No DB or schema change (value lives in the `lifts` jsonb map; `unit:'time'`
+  stores seconds, displays mm:ss, longer ranks higher).
+- Add a *main* lift (new fixed column): DB (athletes column in schema.sql + migration; `decide()` pr
+  branch) and frontend (`LIFTS`/`LIFT_META`, admin + My-PRs form in index.html + logic, a leaderboard section).
 - Restyle: `styles.css`; keep the whiteboard look.

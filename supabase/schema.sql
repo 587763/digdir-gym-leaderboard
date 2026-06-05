@@ -19,6 +19,7 @@ create table public.athletes (
   bench        numeric(6,1) not null default 0 check (bench    >= 0),
   squat        numeric(6,1) not null default 0 check (squat    >= 0),
   deadlift     numeric(6,1) not null default 0 check (deadlift >= 0),
+  lifts        jsonb not null default '{}'::jsonb,   -- "other lifts" map: lift_id -> value (see js/lifts.js)
   achievements text[] not null default '{}',
   avatar       jsonb not null default '{}'::jsonb,   -- reserved (future avatar customizer)
   created_at   timestamptz not null default now(),
@@ -168,11 +169,19 @@ begin
   end if;
 
   if pr.kind = 'pr' then
-    update public.athletes set
-      bench    = case when pr.payload->>'lift'='bench'    then (pr.payload->>'value')::numeric else bench end,
-      squat    = case when pr.payload->>'lift'='squat'    then (pr.payload->>'value')::numeric else squat end,
-      deadlift = case when pr.payload->>'lift'='deadlift' then (pr.payload->>'value')::numeric else deadlift end
-    where id = pr.athlete_id;
+    if pr.payload->>'lift' in ('bench','squat','deadlift') then
+      update public.athletes set
+        bench    = case when pr.payload->>'lift'='bench'    then (pr.payload->>'value')::numeric else bench end,
+        squat    = case when pr.payload->>'lift'='squat'    then (pr.payload->>'value')::numeric else squat end,
+        deadlift = case when pr.payload->>'lift'='deadlift' then (pr.payload->>'value')::numeric else deadlift end
+      where id = pr.athlete_id;
+    else  -- "other lift": store in the jsonb map under its lift_id (no per-lift column)
+      update public.athletes
+        set lifts = jsonb_set(coalesce(lifts, '{}'::jsonb),
+                              array[pr.payload->>'lift'],
+                              to_jsonb((pr.payload->>'value')::numeric), true)
+      where id = pr.athlete_id;
+    end if;
   elsif pr.kind = 'achievement' then
     if pr.payload->>'op' = 'add' then
       update public.athletes
@@ -207,8 +216,8 @@ alter publication supabase_realtime add table public.athletes;
 alter publication supabase_realtime add table public.proposals;
 alter publication supabase_realtime add table public.profiles;
 
-insert into public.athletes (name, bench, squat, deadlift, achievements) values
-  ('Alexander', 132.5, 120.0, 137.5, '{gripper90kg}'),
-  ('Daniel',    110.0, 137.5, 160.0, '{}'),
-  ('Hallvard',  110.0,  80.0,  90.0, '{}'),
-  ('Jens',      137.5,   0.0,   0.0, '{}');
+insert into public.athletes (name, bench, squat, deadlift, achievements, lifts) values
+  ('Alexander', 132.5, 120.0, 137.5, '{gripper90kg}', '{"deadhang": 95}'),
+  ('Daniel',    110.0, 137.5, 160.0, '{}',            '{"deadhang": 72}'),
+  ('Hallvard',  110.0,  80.0,  90.0, '{}',            '{}'),
+  ('Jens',      137.5,   0.0,   0.0, '{}',            '{}');
