@@ -11,6 +11,11 @@ the board updates live across everyone's screens.
 - Changes appear in real time (nice on a wall-mounted display).
 - **Tap any athlete's name** to see their progression — a sparkline of every
   peer-verified PR over time.
+- **Putting it on a TV?** Open the board with `?tv` (e.g. the live URL + `?tv`), or hit
+  the **📺 TV mode** button. You get a full-screen landscape layout that auto-cycles
+  through the tabs hands-free — and pauses while the browser tab is off-screen, so it
+  plays nicely with a screen that rotates between several pages. Add `&rotate=20` to
+  change the seconds per tab (default 15).
 
 ## Who can change what
 
