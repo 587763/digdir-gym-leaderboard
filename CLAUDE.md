@@ -65,8 +65,16 @@ Done = loads in a browser, no console errors. Use the preview tooling (server `l
 to screenshot + read logs. Unfilled config.js → "not connected" banner, not a crash.
 Mock without a DB: `app.athletes=[...]; app.render()`.
 
-## Deploy
-Push to `main` → Pages workflow auto-deploys (~1 min). Commit/push only when the user asks.
+## Branches, PRs & deploy
+- Commit/push only when the user asks — and never straight to `main`. Work on a branch
+  (e.g. `fix/…`, `feat/…`), then open a PR with
+  `env -u GH_TOKEN gh pr create --repo 587763/digdir-gym-leaderboard` (GH_TOKEN is read-only,
+  and the explicit `--repo` keeps gh off the `upstream` remote — see Gotchas).
+- Write the PR description for a human: clear and concise — what changed and why, not a
+  restatement of the diff. For GUI changes, add screenshots (before/after where it helps;
+  capture with the preview tooling, server `leaderboard`). `gh` can't inline images, so save
+  the PNG and attach it to the PR/a comment — or hand it to the user to drop in.
+- Merging the PR to `main` → Pages workflow auto-deploys (~1 min).
 
 ## Backups (free-tier has none)
 `.github/workflows/backup.yml` runs daily (cron 03:17 UTC) + on manual dispatch: `pg_dump`s
@@ -107,7 +115,9 @@ Restore: download the artifact, `gunzip`, then `psql "<target-db-url>" -f leader
 ## Gotchas
 - Live DB is production — test with a throwaway athlete and clean up; don't bulk-delete real ones.
 - `gh`: env sets a read-only `GH_TOKEN` that overrides the user's token. Prefix write ops with
-  `env -u GH_TOKEN` (keyring token has repo+workflow).
+  `env -u GH_TOKEN` (keyring token has repo+workflow). This clone also has an `upstream` remote
+  (`hallvardbjo/digdir-leaderboard`), so pass `--repo 587763/digdir-gym-leaderboard` to
+  `gh pr create` or gh defaults the PR base to upstream and fails.
 - Escape user input: `app.escapeHtml` (element text) / `escapeAttr` in avatar.js (attributes).
 - `app.athletes` is empty for a beat after load; don't assert synchronously.
 - Realtime fires `app.refreshAll()` (re-fetches own profile too, so approvals apply live).
