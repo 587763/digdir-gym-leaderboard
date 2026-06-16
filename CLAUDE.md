@@ -20,6 +20,8 @@ Then verify (below). Keep this file dense — facts agents need, nothing else.
 ## Repo map
 ```
 index.html           markup + script load order
+favicon.svg          marker-style barbell on a whiteboard tile (themed; <link rel=icon>) — source of truth for the mark
+apple-touch-icon.png 180² full-bleed raster of the favicon barbell for iOS home screen (regen note below)
 styles.css           whiteboard theme (Permanent Marker/Caveat fonts; #roughen/#squiggle SVG filters)
 js/config.js         Supabase URL + publishable key (safe to commit)
 js/store.js          ALL Supabase access (data/auth/realtime/RPCs); UI never calls Supabase directly
@@ -33,6 +35,10 @@ supabase/migrations/ hand-applied SQL for the live DB (0001 SUPERSEDED; 0002 = g
 .github/workflows/backup.yml  daily DB dump → 90-day artifact (needs SUPABASE_DB_URL secret)
 .claude/launch.json  preview server "leaderboard"
 ```
+Icons: `favicon.svg` (rounded tile) is the mark; `theme-color` meta = `--whiteboard` (#fbfbf8).
+`apple-touch-icon.png` is a full-bleed variant (square bg, no tile border, barbell scaled ~0.9 for
+iOS's safe-area + corner mask). No ImageMagick here — regen on macOS from a full-bleed SVG with
+`qlmanage -t -s 1024 -o <dir> <full-bleed>.svg` then `sips -z 180 180 <dir>/*.png --out apple-touch-icon.png`.
 
 ## Data model
 - `athletes` — board (verified/displayed): name, bench/squat/deadlift (fixed main-lift columns, kg),
