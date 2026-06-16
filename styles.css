@@ -66,6 +66,7 @@ header { margin-bottom: 28px; }
 }
 
 /* ---- auth ----------------------------------------------------------------- */
+.header-actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .auth-area { display: flex; align-items: center; gap: 10px; }
 .auth-user {
   font-size: 1.2rem; color: var(--ink-soft);
@@ -362,3 +363,69 @@ body.is-admin   .admin-only  { display: inline-flex; }
   .form-body { flex-direction: column-reverse; }
   .avatar-preview-container { flex-basis: auto; }
 }
+
+/* ===========================================================================
+   TV / display mode (html.tv-mode) — full-screen landscape board that uses the
+   horizontal space and auto-cycles tabs hands-free. Toggled by ?tv or the 📺
+   button; rotation + the countdown bar are driven from js/app.js.
+   =========================================================================== */
+/* Scale every rem-based size up for across-the-room reading; adapts 1080p→4K. */
+html.tv-mode { font-size: clamp(18px, 1.15vw, 30px); }
+/* Fit the viewport exactly — clip, never scroll. */
+html.tv-mode, .tv-mode body { height: 100vh; overflow: hidden; }
+.tv-mode body { padding: 18px 28px; }
+.tv-mode .container { max-width: none; height: 100%; margin: 0; display: flex; flex-direction: column; }
+
+/* A TV is read-only — drop the interactive chrome and tap hints. */
+.tv-mode .controls,
+.tv-mode .auth-area,
+.tv-mode .subtitle,
+.tv-mode .hint { display: none; }
+
+/* Compact header so the board claims the height. */
+.tv-mode header { margin-bottom: 12px; }
+.tv-mode .header-titles h1 { font-size: 2.4rem; }
+
+/* The 📺 button becomes a faint, always-available exit in the corner. */
+.tv-mode .tv-toggle { position: fixed; top: 12px; right: 12px; z-index: 50; opacity: 0.2; transition: opacity .15s ease; }
+.tv-mode .tv-toggle:hover { opacity: 1; }
+
+/* Tab strip → centered indicator with a per-tab countdown bar. */
+.tv-mode .tab-navigation { justify-content: center; gap: 18px; margin-bottom: 16px; }
+.tv-mode .tab-btn { font-size: 1.5rem; position: relative; overflow: hidden; }
+.tv-mode .tab-btn.active::after {
+  content: ""; position: absolute; left: 0; bottom: 0; height: 4px; width: 0; background: var(--marker-blue);
+}
+.tv-mode .tab-btn.active.rotating::after { animation: tvProgress var(--rotate-ms, 15000ms) linear forwards; }
+@keyframes tvProgress { from { width: 0; } to { width: 100%; } }
+
+/* Active tab fills the remaining height and clips rather than scrolls. */
+.tv-mode .tab-content.active { flex: 1; min-height: 0; overflow: hidden; display: flex; flex-direction: column; }
+.tv-mode .leaderboards { align-content: start; }
+
+/* Main lifts: three equal columns, each board with its own podium. */
+.tv-mode #lifts-tab .leaderboards { grid-template-columns: repeat(3, 1fr); gap: 28px; }
+/* Other lifts: centered, capped width so a lone lift doesn't sprawl; several tile. */
+.tv-mode #other-tab .leaderboards { display: flex; flex-wrap: wrap; justify-content: center; gap: 28px; }
+.tv-mode #other-tab .leaderboard-section { flex: 1 1 420px; max-width: 760px; }
+/* All columns are equal in TV mode — drop the single default "focused" highlight. */
+.tv-mode #lifts-tab .leaderboard-section.focused,
+.tv-mode #other-tab .leaderboard-section.focused {
+  grid-column: auto; border-color: var(--ink); box-shadow: var(--shadow);
+}
+
+/* Total: prominent podium + a big centered table (don't stretch one column wide). */
+.tv-mode #total-tab .leaderboards { display: block; }
+.tv-mode #total-tab .leaderboard-section { max-width: 70vw; margin: 0 auto; }
+
+/* Hall of Fame tiles across the width (centered so a lone section doesn't sprawl). */
+.tv-mode .fun-lifts-container { display: flex; flex-direction: row; flex-wrap: wrap; justify-content: center; gap: 24px; align-content: start; }
+.tv-mode .achievement-section { flex: 1 1 420px; max-width: 900px; }
+
+/* A touch bigger for legibility from a distance. */
+.tv-mode .leaderboard-section h2 { font-size: 1.9rem; }
+.tv-mode .athlete-name { font-size: 1.5rem; }
+.tv-mode .pr-value { font-size: 1.7rem; }
+.tv-mode .leaderboard-table td { padding: 11px 10px; }
+.tv-mode .podium-medal { font-size: 2rem; }
+.tv-mode .podium-name { font-size: 1.45rem; }

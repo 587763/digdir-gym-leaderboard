@@ -65,6 +65,21 @@ Done = loads in a browser, no console errors. Use the preview tooling (server `l
 to screenshot + read logs. Unfilled config.js → "not connected" banner, not a crash.
 Mock without a DB: `app.athletes=[...]; app.render()`.
 
+## TV / display mode
+Opt-in big-screen view for the office TV: full-width landscape layout (no page scroll, rem
+fonts scaled up) + hands-free tab cycling. Enable with `?tv` (set-and-forget for the TV
+browser) or the 📺 button in the header; `?rotate=<seconds>` overrides the 15s interval.
+- CSS-driven: the `TV / display mode` block in styles.css keys off `html.tv-mode`
+  (3-col Main Lifts with a podium per board, centered Total, capped+centered Other Lifts &
+  Hall of Fame, hidden controls/auth/hints). `renderLeaderboard` shows a podium for every
+  board when `app.tvMode` (not just the focused one). Layout clips, never scrolls — tuned
+  for 1080p; a top-N row cap is the future move if the roster outgrows the screen.
+- Logic on `LeaderboardApp`: `applyTvMode`/`toggleTvMode`/`startRotation`/`stopRotation`/
+  `advanceTab`/`rotationTabs`; state from the URL + `localStorage['lb.tv']`. Rotation
+  pauses via `visibilitychange` while the browser tab is hidden and resumes where it left
+  off (the TV cycles several pages); it skips a tick while a modal is open. Toggling syncs
+  the `?tv` URL param + localStorage. A `--rotate-ms` CSS var drives the countdown bar.
+
 ## Branches, PRs & deploy
 - Commit/push only when the user asks — and never straight to `main`. Work on a branch
   (e.g. `fix/…`, `feat/…`), then open a PR with `env -u GH_TOKEN gh pr create` (GH_TOKEN is

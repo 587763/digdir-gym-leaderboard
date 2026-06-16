@@ -21,6 +21,14 @@ class LeaderboardApp {
     this.editingId = null;
     this.mineSnapshot = null;
     this.activeTab = 'lifts';
+
+    // TV / display mode: ?tv (or the saved toggle) shows a big landscape layout and
+    // cycles the tabs hands-free; ?rotate=<seconds> overrides the 15s default.
+    const params = new URLSearchParams(location.search);
+    this.tvMode = params.has('tv') || localStorage.getItem('lb.tv') === '1';
+    this.rotateMs = Math.min(120000, Math.max(5000, (Number(params.get('rotate')) || 15) * 1000));
+    this.rotateTimer = null;
+
     this.init();
   }
 
@@ -56,7 +64,7 @@ class LeaderboardApp {
     });
 
     this.reflectAuth();
-    this.render();
+    this.applyTvMode(this.tvMode); // renders; starts tab rotation if TV mode is on
   }
 
   async loadIdentity() {
@@ -155,9 +163,10 @@ class LeaderboardApp {
 
   setupEventListeners() {
     document.querySelectorAll('.tab-btn').forEach((btn) =>
-      btn.addEventListener('click', () => this.switchTab(btn.dataset.tab)));
+      btn.addEventListener('click', () => { this.switchTab(btn.dataset.tab); this.restartRotationTimer(); }));
     document.querySelectorAll('.lift-header').forEach((h) =>
       h.addEventListener('click', () => this.focusLift(h.dataset.lift)));
+    document.getElementById('tvModeBtn').onclick = () => this.toggleTvMode();
 
     document.getElementById('myAthleteBtn').onclick = () => this.openMine();
     document.getElementById('claimBtn').onclick = () => this.openClaim();
@@ -179,7 +188,11 @@ class LeaderboardApp {
     window.addEventListener('keydown', (e) => { if (e.key === 'Escape') this.closeAll(); });
 
     // Fallback if a realtime event is missed: refresh when the tab regains focus.
-    document.addEventListener('visibilitychange', () => { if (!document.hidden) this.refreshAll(); });
+    // Also pause/resume TV rotation so off-screen time doesn't burn through tabs.
+    document.addEventListener('visibilitychange', () => {
+      if (this.tvMode) (document.hidden ? this.stopRotation() : this.startRotation());
+      if (!document.hidden) this.refreshAll();
+    });
     window.addEventListener('focus', () => this.refreshAll());
   }
 
@@ -494,6 +507,7 @@ class LeaderboardApp {
     document.querySelectorAll('.tab-btn').forEach((b) => b.classList.toggle('active', b.dataset.tab === tabName));
     document.querySelectorAll('.tab-content').forEach((c) => c.classList.remove('active'));
     document.getElementById(`${tabName}-tab`).classList.add('active');
+    if (this.tvMode) this.restartProgress();
   }
   // Spotlight a lift (podium) within its own tab — works for main and other lifts.
   focusLift(liftType) {
@@ -503,6 +517,68 @@ class LeaderboardApp {
     group.querySelectorAll('.leaderboard-section').forEach((s) => s.classList.remove('focused'));
     section.classList.add('focused');
     this.render();
+  }
+
+  // --- TV / display mode ----------------------------------------------------
+  // Big landscape layout + hands-free tab cycling, toggled by ?tv or the 📺 button.
+  // Rotation pauses while the browser tab is hidden (the office TV cycles between a
+  // few pages) and resumes where it left off, so every tab gets airtime over time.
+  applyTvMode(on) {
+    this.tvMode = on;
+    document.documentElement.classList.toggle('tv-mode', on);
+    document.documentElement.style.setProperty('--rotate-ms', `${this.rotateMs}ms`);
+    if (on) this.closeAll();
+    this.render(); // add/remove the per-board podiums TV mode shows
+    if (on) this.startRotation(); else this.stopRotation();
+  }
+
+  toggleTvMode() {
+    const on = !this.tvMode;
+    try { localStorage.setItem('lb.tv', on ? '1' : '0'); } catch { /* private mode */ }
+    // Keep the URL honest so a reload matches what's on screen.
+    const url = new URL(location.href);
+    if (on) url.searchParams.set('tv', '1'); else url.searchParams.delete('tv');
+    history.replaceState(null, '', url);
+    this.applyTvMode(on);
+  }
+
+  // Tabs to cycle, in on-screen order; skip Other Lifts when none are configured.
+  rotationTabs() {
+    return [...document.querySelectorAll('.tab-btn')]
+      .map((b) => b.dataset.tab)
+      .filter((t) => !(t === 'other' && window.OTHER_LIFTS.length === 0));
+  }
+
+  startRotation() {
+    this.stopRotation();
+    if (!this.tvMode || document.hidden) return;
+    this.restartProgress();
+    this.rotateTimer = setInterval(() => this.advanceTab(), this.rotateMs);
+  }
+  stopRotation() {
+    if (this.rotateTimer) { clearInterval(this.rotateTimer); this.rotateTimer = null; }
+    document.querySelectorAll('.tab-btn.rotating').forEach((b) => b.classList.remove('rotating'));
+  }
+  restartRotationTimer() { if (this.tvMode) this.startRotation(); } // e.g. after a manual tab click
+
+  advanceTab() {
+    if (this.anyModalOpen()) return; // don't yank a tab out from under someone reading
+    const tabs = this.rotationTabs();
+    const i = tabs.indexOf(this.activeTab);
+    this.switchTab(tabs[(i + 1) % tabs.length]);
+  }
+
+  anyModalOpen() {
+    return [...document.querySelectorAll('.modal')].some((m) => m.style.display === 'block');
+  }
+
+  // Restart the CSS countdown bar under the active tab (remove → reflow → re-add).
+  restartProgress() {
+    document.querySelectorAll('.tab-btn.rotating').forEach((b) => b.classList.remove('rotating'));
+    const bar = document.querySelector('.tab-btn.active');
+    if (!bar) return;
+    void bar.offsetWidth;
+    if (this.tvMode && !document.hidden && !this.anyModalOpen()) bar.classList.add('rotating');
   }
 
   // --- board rendering ------------------------------------------------------
@@ -548,7 +624,7 @@ class LeaderboardApp {
       tbody.innerHTML = `<tr><td colspan="3" class="empty-state">No entries yet.</td></tr>`;
       return;
     }
-    const showPodium = section.classList.contains('focused');
+    const showPodium = section.classList.contains('focused') || this.tvMode;
     const tableAthletes = showPodium ? ranked.slice(3) : ranked;
     const startRank = showPodium ? 4 : 1;
     if (showPodium) this.renderPodium(section, ranked.slice(0, 3), liftType);
