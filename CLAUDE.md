@@ -85,9 +85,8 @@ browser) or the 📺 button in the header; `?rotate=<seconds>` overrides the 15s
   (e.g. `fix/…`, `feat/…`), then open a PR with `env -u GH_TOKEN gh pr create` (GH_TOKEN is
   read-only — see Gotchas).
 - Write the PR description for a human: clear and concise — what changed and why, not a
-  restatement of the diff. For GUI changes, add screenshots (before/after where it helps;
-  capture with the preview tooling, server `leaderboard`). `gh` can't inline images, so save
-  the PNG and attach it to the PR/a comment — or hand it to the user to drop in.
+  restatement of the diff. Don't attach screenshots — `gh` can't upload images from the CLI;
+  the user adds any PR visuals. (Still screenshot to *verify* GUI changes — see Run & verify.)
 - Merging the PR to `main` → Pages workflow auto-deploys (~1 min).
 
 ## Backups (free-tier has none)
