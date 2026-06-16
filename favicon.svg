@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Digdir Gym Leaderboard">
+  <!-- whiteboard tile -->
+  <rect x="2" y="2" width="60" height="60" rx="14" fill="#fbfbf8" stroke="#cbd5e1" stroke-width="2"/>
+  <!-- barbell, marker-style, tilted like a quick whiteboard sketch -->
+  <g transform="rotate(-7 32 32)" fill="none" stroke="#1e293b" stroke-linecap="round" stroke-linejoin="round">
+    <!-- bar + sleeves -->
+    <line x1="6" y1="32" x2="58" y2="32" stroke-width="5"/>
+    <!-- inner plates (tall, marker blue) -->
+    <rect x="18" y="17" width="8" height="30" rx="4" fill="#2563eb" stroke-width="2.5"/>
+    <rect x="38" y="17" width="8" height="30" rx="4" fill="#2563eb" stroke-width="2.5"/>
+    <!-- outer plates (short, marker red) -->
+    <rect x="9"  y="22.5" width="7" height="19" rx="3.5" fill="#ef4444" stroke-width="2.5"/>
+    <rect x="48" y="22.5" width="7" height="19" rx="3.5" fill="#ef4444" stroke-width="2.5"/>
+    <!-- knurling grip ticks -->
+    <path d="M30 29.5v5M34 29.5v5" stroke-width="1.4"/>
+  </g>
+</svg>
