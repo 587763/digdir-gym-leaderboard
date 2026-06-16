@@ -67,9 +67,8 @@ Mock without a DB: `app.athletes=[...]; app.render()`.
 
 ## Branches, PRs & deploy
 - Commit/push only when the user asks — and never straight to `main`. Work on a branch
-  (e.g. `fix/…`, `feat/…`), then open a PR with
-  `env -u GH_TOKEN gh pr create --repo 587763/digdir-gym-leaderboard` (GH_TOKEN is read-only,
-  and the explicit `--repo` keeps gh off the `upstream` remote — see Gotchas).
+  (e.g. `fix/…`, `feat/…`), then open a PR with `env -u GH_TOKEN gh pr create` (GH_TOKEN is
+  read-only — see Gotchas).
 - Write the PR description for a human: clear and concise — what changed and why, not a
   restatement of the diff. For GUI changes, add screenshots (before/after where it helps;
   capture with the preview tooling, server `leaderboard`). `gh` can't inline images, so save
@@ -115,9 +114,7 @@ Restore: download the artifact, `gunzip`, then `psql "<target-db-url>" -f leader
 ## Gotchas
 - Live DB is production — test with a throwaway athlete and clean up; don't bulk-delete real ones.
 - `gh`: env sets a read-only `GH_TOKEN` that overrides the user's token. Prefix write ops with
-  `env -u GH_TOKEN` (keyring token has repo+workflow). This clone also has an `upstream` remote
-  (`hallvardbjo/digdir-leaderboard`), so pass `--repo 587763/digdir-gym-leaderboard` to
-  `gh pr create` or gh defaults the PR base to upstream and fails.
+  `env -u GH_TOKEN` (keyring token has repo+workflow).
 - Escape user input: `app.escapeHtml` (element text) / `escapeAttr` in avatar.js (attributes).
 - `app.athletes` is empty for a beat after load; don't assert synchronously.
 - Realtime fires `app.refreshAll()` (re-fetches own profile too, so approvals apply live).
