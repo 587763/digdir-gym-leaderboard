@@ -202,7 +202,8 @@ body.is-admin   .admin-only  { display: inline-flex; }
 .podium-spot { display: flex; flex-direction: column; align-items: center; width: 33%; max-width: 200px; }
 .podium-athlete { display: flex; flex-direction: column; align-items: center; margin-bottom: 6px; }
 .podium-avatar { line-height: 0; }
-.podium-medal { font-size: 1.6rem; margin-top: -6px; }
+.podium-medal { margin-top: -6px; line-height: 0; }
+.medal-svg { display: block; }
 .podium-name { font-size: 1.3rem; font-weight: 700; text-align: center; }
 .podium-value { font-size: 1.15rem; color: var(--ink-soft); }
 .podium-stand {
@@ -400,7 +401,7 @@ html.tv-mode, .tv-mode body { height: 100vh; overflow: hidden; }
 @keyframes tvProgress { from { width: 0; } to { width: 100%; } }
 
 /* Active tab fills the remaining height and clips rather than scrolls. */
-.tv-mode .tab-content.active { flex: 1; min-height: 0; overflow: hidden; display: flex; flex-direction: column; }
+.tv-mode .tab-content.active { flex: 1; min-height: 0; overflow: hidden; display: flex; flex-direction: column; position: relative; }
 .tv-mode .leaderboards { align-content: start; }
 
 /* Main lifts: three equal columns, each board with its own podium. */
@@ -426,6 +427,22 @@ html.tv-mode, .tv-mode body { height: 100vh; overflow: hidden; }
 .tv-mode .leaderboard-section h2 { font-size: 1.9rem; }
 .tv-mode .athlete-name { font-size: 1.5rem; }
 .tv-mode .pr-value { font-size: 1.7rem; }
-.tv-mode .leaderboard-table td { padding: 11px 10px; }
-.tv-mode .podium-medal { font-size: 2rem; }
+.tv-mode .leaderboard-table td { padding: 6px 10px; }
 .tv-mode .podium-name { font-size: 1.45rem; }
+
+/* Keep the podium, but trim its footprint in TV mode so more ranked rows fit per
+   page (fewer, faster-cycling pages). Shorter stands + tighter stack here; the avatar
+   and medal are shrunk via their size args in renderPodium (explicit SVG width/height,
+   centred by construction). Still clearly a top-3 podium. */
+.tv-mode .podium-athlete { margin-bottom: 2px; }
+.tv-mode .podium-medal { margin-top: -4px; }
+.tv-mode .podium-spot.first  .podium-stand { height: 80px; }
+.tv-mode .podium-spot.second .podium-stand { height: 58px; }
+.tv-mode .podium-spot.third  .podium-stand { height: 42px; }
+
+/* Page dots: shown when a tab's roster spans more than one screen. The rotation
+   cycles a page per tick before advancing to the next tab; the active dot tracks
+   which slice is on screen. TV_PAGE_PAD in app.js reserves the room below. */
+.tv-page-dots { position: absolute; left: 0; right: 0; bottom: 8px; display: flex; justify-content: center; gap: 12px; }
+.tv-page-dot { width: 12px; height: 12px; border-radius: 50%; border: 2px solid var(--ink); opacity: 0.4; }
+.tv-page-dot.active { background: var(--marker-blue); border-color: var(--marker-blue); opacity: 1; }
