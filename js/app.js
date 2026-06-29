@@ -4,6 +4,9 @@
 // changes / new athletes (admin-approved). Rules are enforced in the DB; this is UI.
 
 const LIFTS = ['squat', 'bench', 'deadlift'];
+// Height reserved at the bottom of a TV-mode tab for the page dots (so paged rows
+// never tuck under them). See fitTvPaging.
+const TV_PAGE_PAD = 48;
 const LIFT_META = {
   squat: { emoji: '🦵', label: 'Squat' },
   bench: { emoji: '🏋️', label: 'Bench Press' },
@@ -28,6 +31,8 @@ class LeaderboardApp {
     this.tvMode = params.has('tv') || localStorage.getItem('lb.tv') === '1';
     this.rotateMs = Math.min(120000, Math.max(5000, (Number(params.get('rotate')) || 15) * 1000));
     this.rotateTimer = null;
+    this.tvPage = 0;   // current page within the active tab (TV mode paginates tall boards)
+    this.tvPages = 1;  // page count for the active tab, recomputed by fitTvPaging
 
     this.init();
   }
@@ -194,6 +199,14 @@ class LeaderboardApp {
       if (!document.hidden) this.refreshAll();
     });
     window.addEventListener('focus', () => this.refreshAll());
+
+    // Re-fit TV pagination when the screen size changes (e.g. the TV reconnects).
+    let resizeT;
+    window.addEventListener('resize', () => {
+      if (!this.tvMode) return;
+      clearTimeout(resizeT);
+      resizeT = setTimeout(() => this.fitTvPaging(), 150);
+    });
   }
 
   // --- modal plumbing -------------------------------------------------------
@@ -507,7 +520,7 @@ class LeaderboardApp {
     document.querySelectorAll('.tab-btn').forEach((b) => b.classList.toggle('active', b.dataset.tab === tabName));
     document.querySelectorAll('.tab-content').forEach((c) => c.classList.remove('active'));
     document.getElementById(`${tabName}-tab`).classList.add('active');
-    if (this.tvMode) this.restartProgress();
+    if (this.tvMode) { this.tvPage = 0; this.fitTvPaging(); }
   }
   // Spotlight a lift (podium) within its own tab — works for main and other lifts.
   focusLift(liftType) {
@@ -526,9 +539,9 @@ class LeaderboardApp {
   applyTvMode(on) {
     this.tvMode = on;
     document.documentElement.classList.toggle('tv-mode', on);
-    document.documentElement.style.setProperty('--rotate-ms', `${this.rotateMs}ms`);
     if (on) this.closeAll();
-    this.render(); // add/remove the per-board podiums TV mode shows
+    else { this.tvPage = 0; document.querySelectorAll('.tv-page-dots').forEach((d) => d.remove()); }
+    this.render(); // add/remove the per-board podiums + pagination TV mode shows
     if (on) this.startRotation(); else this.stopRotation();
   }
 
@@ -551,32 +564,58 @@ class LeaderboardApp {
 
   startRotation() {
     this.stopRotation();
+    this.scheduleTick();
+  }
+  // One self-rescheduling tick. Page dwells vary (see currentDwellMs), so a fixed
+  // setInterval won't do — each tick schedules the next using the current dwell.
+  scheduleTick() {
     if (!this.tvMode || document.hidden) return;
     this.restartProgress();
-    this.rotateTimer = setInterval(() => this.advanceTab(), this.rotateMs);
+    this.rotateTimer = setTimeout(() => { this.advanceTab(); this.scheduleTick(); }, this.currentDwellMs());
   }
   stopRotation() {
-    if (this.rotateTimer) { clearInterval(this.rotateTimer); this.rotateTimer = null; }
+    if (this.rotateTimer) { clearTimeout(this.rotateTimer); this.rotateTimer = null; }
     document.querySelectorAll('.tab-btn.rotating').forEach((b) => b.classList.remove('rotating'));
   }
   restartRotationTimer() { if (this.tvMode) this.startRotation(); } // e.g. after a manual tab click
 
+  // rotateMs is the budget *per tab* (the configured cadence), so a multi-page tab
+  // still hands off on time. Pages split that budget; page 1 (podium + top ranks)
+  // gets double the dwell of the rest, which viewers mostly scan for their own name.
+  currentDwellMs() {
+    const pages = Math.max(1, this.tvPages);
+    const weight = this.tvPage === 0 ? 2 : 1;
+    return Math.round((this.rotateMs * weight) / (pages + 1));
+  }
+
   advanceTab() {
     if (this.anyModalOpen()) return; // don't yank a tab out from under someone reading
+    if (this.advanceTvPage()) return; // page through a tall board before leaving the tab
     const tabs = this.rotationTabs();
     const i = tabs.indexOf(this.activeTab);
     this.switchTab(tabs[(i + 1) % tabs.length]);
+  }
+
+  // Step to the next page of the active tab; false when it's already the last page
+  // (so advanceTab moves on to the next tab). The progress bar restarts via scheduleTick.
+  advanceTvPage() {
+    if (!this.tvMode || this.tvPage + 1 >= this.tvPages) return false;
+    this.tvPage++;
+    this.applyTvPage();
+    return true;
   }
 
   anyModalOpen() {
     return [...document.querySelectorAll('.modal')].some((m) => m.style.display === 'block');
   }
 
-  // Restart the CSS countdown bar under the active tab (remove → reflow → re-add).
+  // Restart the CSS countdown bar under the active tab (remove → reflow → re-add),
+  // matching its duration to the current page's dwell.
   restartProgress() {
     document.querySelectorAll('.tab-btn.rotating').forEach((b) => b.classList.remove('rotating'));
     const bar = document.querySelector('.tab-btn.active');
     if (!bar) return;
+    document.documentElement.style.setProperty('--rotate-ms', `${this.currentDwellMs()}ms`);
     void bar.offsetWidth;
     if (this.tvMode && !document.hidden && !this.anyModalOpen()) bar.classList.add('rotating');
   }
@@ -605,6 +644,7 @@ class LeaderboardApp {
     window.OTHER_LIFTS.forEach((l) => this.renderLeaderboard(l.id));
     this.renderHallOfFame();
     this.updateReviewCount();
+    if (this.tvMode) this.fitTvPaging();
   }
 
   updateReviewCount() {
@@ -644,7 +684,6 @@ class LeaderboardApp {
     container.className = 'podium-container';
     const order = [top3[1], top3[0], top3[2]];
     const positions = ['second', 'first', 'third'];
-    const medals = ['🥈', '🥇', '🥉'];
     const ranks = [2, 1, 3];
     order.forEach((athlete, i) => {
       if (!athlete) return;
@@ -652,8 +691,8 @@ class LeaderboardApp {
       spot.className = `podium-spot ${positions[i]}`;
       spot.innerHTML = `
         <div class="podium-athlete">
-          <div class="podium-avatar">${window.renderAvatar(athlete, 84)}</div>
-          <div class="podium-medal">${medals[i]}</div>
+          <div class="podium-avatar">${window.renderAvatar(athlete, this.tvMode ? 48 : 84)}</div>
+          <div class="podium-medal">${this.medalMark(ranks[i], this.tvMode ? 26 : 32)}</div>
           <div class="podium-name"><button type="button" class="athlete-link" onclick="app.openHistory('${athlete.id}')" title="See progression">${this.escapeHtml(athlete.name)}</button></div>
           <div class="podium-value">${this.displayValueUnit(liftType, this.valueFor(athlete, liftType))}</div>
         </div>
@@ -661,6 +700,70 @@ class LeaderboardApp {
       container.appendChild(spot);
     });
     section.querySelector('h2').after(container);
+  }
+
+  // Inline SVG medal (gold/silver/bronze + rank), symmetric about the viewBox center
+  // so it sits dead-centered under the figure. Replaces the 🥇/🥈/🥉 emoji, whose
+  // glyph paints left of its box on many platforms (and matches the marker look better).
+  medalMark(rank, size = 32) {
+    const fill = { 1: 'var(--gold)', 2: 'var(--silver)', 3: 'var(--bronze)' }[rank] || 'var(--gold)';
+    const edge = { 1: '#d99e16', 2: '#94a3b8', 3: '#b06a44' }[rank] || '#d99e16';
+    return `<svg class="medal-svg" viewBox="0 0 40 50" width="${size}" height="${size * 1.25}"
+         role="img" aria-label="rank ${rank}" xmlns="http://www.w3.org/2000/svg">
+      <path d="M13 3 L21 27 L11 29 Z" fill="#8aa0c4"/>
+      <path d="M27 3 L19 27 L29 29 Z" fill="#d09a9a"/>
+      <circle cx="20" cy="34" r="14" fill="${fill}" stroke="${edge}" stroke-width="2.5"/>
+      <text x="20" y="39.5" text-anchor="middle" font-size="15" font-weight="700" fill="#5a4636"
+            font-family="'Permanent Marker','Caveat',cursive">${rank}</text>
+    </svg>`;
+  }
+
+  // TV mode: a roster can outgrow one screen. Rather than clip the overflow rows
+  // (rank 4+ under each podium), measure how many fit beneath the podium and split
+  // the rest into screen-sized pages that the tab rotation cycles through, so every
+  // athlete gets airtime. No-op for small rosters (everything fits → a single page).
+  // Runs after render, on tab switch and on resize — never on a hidden tab.
+  // TODO(tv): the podium eats the most vertical room; a more compact top-3 in dense
+  //   layouts would free rows and shrink the page count.
+  fitTvPaging() {
+    const frame = document.querySelector('.tab-content.active');
+    if (!this.tvMode || !frame) { this.tvPages = 1; return; }
+    const bottom = frame.getBoundingClientRect().bottom - TV_PAGE_PAD;
+    this.tvBoards = [];
+    let pages = 1;
+    frame.querySelectorAll('.leaderboard-section').forEach((section) => {
+      const tbody = section.querySelector('tbody');
+      const rows = tbody && !tbody.querySelector('.empty-state') ? [...tbody.rows] : [];
+      if (rows.length === 0) return;
+      rows.forEach((tr) => { tr.hidden = false; }); // un-hide so we measure the full table, not a prior page
+      const rowH = rows[0].getBoundingClientRect().height || 1;
+      const perPage = Math.max(1, Math.floor((bottom - tbody.getBoundingClientRect().top) / rowH));
+      this.tvBoards.push({ rows, perPage, pages: Math.ceil(rows.length / perPage) });
+      pages = Math.max(pages, Math.ceil(rows.length / perPage));
+    });
+    this.tvPages = pages;
+    this.tvPage = Math.min(this.tvPage, pages - 1);
+    this.applyTvPage();
+  }
+
+  // Show only the current page's slice of each board's overflow rows, then draw the
+  // page dots. A board with fewer pages pins to its last page, so a shorter board
+  // never blinks empty while a longer one is still paging.
+  applyTvPage() {
+    (this.tvBoards || []).forEach(({ rows, perPage, pages }) => {
+      const start = Math.min(this.tvPage, pages - 1) * perPage;
+      rows.forEach((tr, i) => { tr.hidden = i < start || i >= start + perPage; });
+    });
+    const frame = document.querySelector('.tab-content.active');
+    if (!frame) return;
+    frame.querySelector('.tv-page-dots')?.remove();
+    if (this.tvPages <= 1) return;
+    const dots = document.createElement('div');
+    dots.className = 'tv-page-dots';
+    dots.setAttribute('aria-hidden', 'true');
+    dots.innerHTML = Array.from({ length: this.tvPages }, (_, i) =>
+      `<span class="tv-page-dot${i === this.tvPage ? ' active' : ''}"></span>`).join('');
+    frame.appendChild(dots);
   }
 
   renderHallOfFame() {

@@ -74,17 +74,32 @@ Mock without a DB: `app.athletes=[...]; app.render()`.
 ## TV / display mode
 Opt-in big-screen view for the office TV: full-width landscape layout (no page scroll, rem
 fonts scaled up) + hands-free tab cycling. Enable with `?tv` (set-and-forget for the TV
-browser) or the 📺 button in the header; `?rotate=<seconds>` overrides the 15s interval.
+browser) or the 📺 button in the header; `?rotate=<seconds>` overrides the 15s-per-tab budget.
 - CSS-driven: the `TV / display mode` block in styles.css keys off `html.tv-mode`
   (3-col Main Lifts with a podium per board, centered Total, capped+centered Other Lifts &
   Hall of Fame, hidden controls/auth/hints). `renderLeaderboard` shows a podium for every
-  board when `app.tvMode` (not just the focused one). Layout clips, never scrolls — tuned
-  for 1080p; a top-N row cap is the future move if the roster outgrows the screen.
-- Logic on `LeaderboardApp`: `applyTvMode`/`toggleTvMode`/`startRotation`/`stopRotation`/
-  `advanceTab`/`rotationTabs`; state from the URL + `localStorage['lb.tv']`. Rotation
-  pauses via `visibilitychange` while the browser tab is hidden and resumes where it left
-  off (the TV cycles several pages); it skips a tick while a modal is open. Toggling syncs
-  the `?tv` URL param + localStorage. A `--rotate-ms` CSS var drives the countdown bar.
+  board when `app.tvMode` (not just the focused one); the podium is compacted in TV mode
+  (shorter stands, smaller avatar/medal) so more ranked rows fit. Layout clips, never scrolls.
+- Pagination (so a big roster isn't cut off): `fitTvPaging` measures how many overflow
+  rows (rank 4+, under each podium) fit beneath the podium and splits the rest into
+  screen-sized pages; the rotation steps a page at a time (`advanceTvPage`) before moving
+  to the next tab. `applyTvPage` toggles `tr.hidden` for the current slice and draws the
+  `.tv-page-dots`. A board with fewer pages pins to its last page so it never blinks empty.
+  `TV_PAGE_PAD` reserves room below for the dots. Recomputed after render, on tab switch
+  and on resize. No-op for small rosters (one page, no dots). Podium is still the biggest
+  vertical cost — `// TODO(tv)` in fitTvPaging: an even more compact dense-layout top-3
+  would free more rows.
+- Timing: `rotateMs` is the budget *per tab*, not per page, so a multi-page tab still hands
+  off on the configured cadence. `currentDwellMs` splits that budget across the tab's pages,
+  giving page 1 double the dwell of the rest (weights 2 : 1 : 1 …). Because dwells vary,
+  rotation is a self-rescheduling `setTimeout` (`scheduleTick`), not a `setInterval`; each
+  page sets `--rotate-ms` to its own dwell so the countdown bar matches.
+- Logic on `LeaderboardApp`: `applyTvMode`/`toggleTvMode`/`startRotation`/`scheduleTick`/
+  `stopRotation`/`currentDwellMs`/`advanceTab`/`advanceTvPage`/`fitTvPaging`/`applyTvPage`/
+  `rotationTabs`; state from the URL + `localStorage['lb.tv']` (+ `tvPage`/`tvPages`/`tvBoards`).
+  Rotation pauses via `visibilitychange` while the browser tab is hidden and resumes where it
+  left off (the TV cycles several pages); it skips a tick while a modal is open. Toggling syncs
+  the `?tv` URL param + localStorage.
 
 ## Branches, PRs & deploy
 - Commit/push only when the user asks — and never straight to `main`. Work on a branch
