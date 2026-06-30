@@ -14,6 +14,14 @@ const LIFT_META = {
   total: { emoji: '🏆', label: 'Total' },
 };
 
+// Extra-lift tabs: a lift's `group` (js/lifts.js; default 'other') routes its board
+// to one of these tabs, each backed by a DOM container. Both draw from athletes.lifts.
+const OTHER_LIFT_TABS = [
+  { tab: 'other',  container: 'otherLiftsBoards' },
+  { tab: 'cardio', container: 'cardioBoards' },
+];
+const liftGroup = (l) => l.group || 'other';
+
 class LeaderboardApp {
   constructor() {
     this.athletes = [];
@@ -137,21 +145,25 @@ class LeaderboardApp {
     ).join('');
   }
 
-  // One leaderboard section per "other lift" (js/lifts.js); first one focused by default.
+  // One leaderboard section per "other lift" (js/lifts.js), grouped into its tab
+  // (Other Lifts / Cardio); the first section in each tab is focused by default.
   buildOtherLiftSections() {
-    const root = document.getElementById('otherLiftsBoards');
-    if (!root) return;
-    if (window.OTHER_LIFTS.length === 0) {
-      root.innerHTML = '<p class="empty-state">No other lifts configured yet.</p>';
-      return;
+    for (const { tab, container } of OTHER_LIFT_TABS) {
+      const root = document.getElementById(container);
+      if (!root) continue;
+      const lifts = window.OTHER_LIFTS.filter((l) => liftGroup(l) === tab);
+      if (lifts.length === 0) {
+        root.innerHTML = '<p class="empty-state">Nothing here yet.</p>';
+        continue;
+      }
+      root.innerHTML = lifts.map((l, i) => {
+        const head = l.unit === 'time' ? 'Time (m:ss)' : l.unit === 'reps' ? 'Reps' : 'PR (kg)';
+        return `<div class="leaderboard-section${i === 0 ? ' focused' : ''}" data-lift="${l.id}">
+          <h2 class="lift-header" data-lift="${l.id}">${l.emoji} ${this.escapeHtml(l.label)}</h2>
+          <table class="leaderboard-table" id="${l.id}Table"><thead><tr><th>Rank</th><th>Name</th><th>${head}</th></tr></thead><tbody></tbody></table>
+        </div>`;
+      }).join('');
     }
-    root.innerHTML = window.OTHER_LIFTS.map((l, i) => {
-      const head = l.unit === 'time' ? 'Time (m:ss)' : 'PR (kg)';
-      return `<div class="leaderboard-section${i === 0 ? ' focused' : ''}" data-lift="${l.id}">
-        <h2 class="lift-header" data-lift="${l.id}">${l.emoji} ${this.escapeHtml(l.label)}</h2>
-        <table class="leaderboard-table" id="${l.id}Table"><thead><tr><th>Rank</th><th>Name</th><th>${head}</th></tr></thead><tbody></tbody></table>
-      </div>`;
-    }).join('');
   }
 
   // Number inputs for the "other lifts", reused by the My-PRs (peer) and admin forms.
@@ -159,8 +171,8 @@ class LeaderboardApp {
     const el = document.getElementById(containerId);
     if (!el) return;
     el.innerHTML = window.OTHER_LIFTS.map((l) => {
-      const unit = l.unit === 'time' ? 'sec' : 'kg';
-      const step = l.unit === 'time' ? '1' : '0.5';
+      const unit = l.unit === 'time' ? 'sec' : l.unit === 'reps' ? 'reps' : 'kg';
+      const step = l.unit === 'kg' ? '0.5' : '1';
       const tag = peer ? ' <span class="tag tag-peer">peer verify</span>' : '';
       return `<div class="form-group"><label for="${prefix}${l.id}">${l.emoji} ${this.escapeHtml(l.label)} (${unit})${tag}</label><input type="number" id="${prefix}${l.id}" step="${step}" min="0"${zero ? ' value="0"' : ''}></div>`;
     }).join('');
@@ -555,11 +567,14 @@ class LeaderboardApp {
     this.applyTvMode(on);
   }
 
-  // Tabs to cycle, in on-screen order; skip Other Lifts when none are configured.
+  // Tabs to cycle, in on-screen order; skip an extra-lift tab that has no exercises.
   rotationTabs() {
+    const empty = new Set(OTHER_LIFT_TABS
+      .filter(({ tab }) => !window.OTHER_LIFTS.some((l) => liftGroup(l) === tab))
+      .map(({ tab }) => tab));
     return [...document.querySelectorAll('.tab-btn')]
       .map((b) => b.dataset.tab)
-      .filter((t) => !(t === 'other' && window.OTHER_LIFTS.length === 0));
+      .filter((t) => !empty.has(t));
   }
 
   startRotation() {
@@ -627,15 +642,25 @@ class LeaderboardApp {
     if (window.getOtherLift(lift)) return Number(a.lifts?.[lift] ?? 0);
     return a[lift];
   }
-  // Sorts descending, so for time lifts (seconds) a LONGER hang ranks higher.
-  sorted(lift) { return [...this.athletes].sort((a, b) => this.valueFor(b, lift) - this.valueFor(a, lift)); }
+  // Descending by value, so heavier/longer/more ranks higher — except lowerIsBetter
+  // lifts (e.g. a timed run), where a smaller value (faster) ranks higher.
+  sorted(lift) {
+    const dir = window.getOtherLift(lift)?.lowerIsBetter ? -1 : 1;
+    return [...this.athletes].sort((a, b) => dir * (this.valueFor(b, lift) - this.valueFor(a, lift)));
+  }
 
   liftUnit(lift) { return window.getOtherLift(lift)?.unit || 'kg'; }
   displayValue(lift, value) {
-    return this.liftUnit(lift) === 'time' ? window.formatLiftTime(value) : Number(value).toFixed(1);
+    const unit = this.liftUnit(lift);
+    if (unit === 'time') return window.formatLiftTime(value);
+    if (unit === 'reps') return String(Math.round(Number(value) || 0));
+    return Number(value).toFixed(1);
   }
   displayValueUnit(lift, value) {
-    return this.liftUnit(lift) === 'time' ? this.displayValue(lift, value) : `${this.displayValue(lift, value)} kg`;
+    const unit = this.liftUnit(lift);
+    if (unit === 'time') return this.displayValue(lift, value);
+    if (unit === 'reps') return `${this.displayValue(lift, value)} reps`;
+    return `${this.displayValue(lift, value)} kg`;
   }
 
   render() {
@@ -839,9 +864,11 @@ class LeaderboardApp {
     const first = series[0].value;
     const last = series[series.length - 1].value;
     const delta = last - first;
+    // For lowerIsBetter lifts (e.g. a run) a smaller value is the improvement.
+    const improved = window.getOtherLift(lid)?.lowerIsBetter ? delta <= 0 : delta >= 0;
     const head = series.length === 1
       ? '<span class="history-delta first">first PR</span>'
-      : `<span class="history-delta ${delta >= 0 ? 'up' : 'down'}">${this.displaySignedDelta(lid, delta)}</span>`;
+      : `<span class="history-delta ${improved ? 'up' : 'down'}">${this.displaySignedDelta(lid, delta)}</span>`;
     const points = series.map((p) =>
       `<li><span class="hist-date">${this.formatDate(p.at)}</span><span class="hist-val">${this.escapeHtml(this.displayValueUnit(lid, p.value))}</span></li>`
     ).join('');
@@ -875,8 +902,11 @@ class LeaderboardApp {
   // Signed change for the lift's unit ("+12.5 kg" / "−0:08" for time lifts).
   displaySignedDelta(lid, delta) {
     const sign = delta > 0 ? '+' : delta < 0 ? '−' : '';
+    const unit = this.liftUnit(lid);
     const mag = Math.abs(delta);
-    return this.liftUnit(lid) === 'time' ? `${sign}${window.formatLiftTime(mag)}` : `${sign}${mag.toFixed(1)} kg`;
+    if (unit === 'time') return `${sign}${window.formatLiftTime(mag)}`;
+    if (unit === 'reps') return `${sign}${Math.round(mag)} reps`;
+    return `${sign}${mag.toFixed(1)} kg`;
   }
 
   formatDate(iso) {
