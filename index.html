@@ -52,6 +52,7 @@
       <button class="tab-btn active" data-tab="lifts">Main Lifts</button>
       <button class="tab-btn" data-tab="total">Total</button>
       <button class="tab-btn" data-tab="other">Other Lifts</button>
+      <button class="tab-btn" data-tab="cardio">🏃 Cardio</button>
       <button class="tab-btn" data-tab="fun">🏆 Hall of Fame</button>
     </div>
 
@@ -210,6 +211,12 @@
     <div class="tab-content" id="other-tab">
       <div class="leaderboards" id="otherLiftsBoards"></div>
       <p class="hint">Tap a lift's title to spotlight it with a podium.</p>
+    </div>
+
+    <!-- Cardio: sections built dynamically from js/lifts.js (group: 'cardio') -->
+    <div class="tab-content" id="cardio-tab">
+      <div class="leaderboards" id="cardioBoards"></div>
+      <p class="hint">Tap a title to spotlight it with a podium.</p>
     </div>
 
     <div class="tab-content" id="fun-tab">

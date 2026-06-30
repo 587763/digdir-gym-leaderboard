@@ -28,7 +28,7 @@ js/store.js          ALL Supabase access (data/auth/realtime/RPCs); UI never cal
 js/app.js            UI controller (class LeaderboardApp, global `app`)
 js/avatar.js         renderAvatar(athlete, size) — stick figure from name
 js/achievements.js   ACHIEVEMENTS registry (extensible)
-js/lifts.js          OTHER_LIFTS registry (extra non-main lifts: id/label/emoji/unit kg|time) + time fmt
+js/lifts.js          OTHER_LIFTS registry (extra non-main exercises: id/label/emoji/unit kg|reps|time, optional group→Cardio tab) + time fmt
 supabase/schema.sql  canonical fresh-install DB (tables + RLS + functions + seed)
 supabase/migrations/ hand-applied SQL for the live DB (0001 SUPERSEDED; 0002 = governance; 0003 = other lifts; 0004 = public PR history)
 .github/workflows/deploy.yml  Pages deploy on push to main
@@ -76,8 +76,8 @@ Opt-in big-screen view for the office TV: full-width landscape layout (no page s
 fonts scaled up) + hands-free tab cycling. Enable with `?tv` (set-and-forget for the TV
 browser) or the 📺 button in the header; `?rotate=<seconds>` overrides the 15s-per-tab budget.
 - CSS-driven: the `TV / display mode` block in styles.css keys off `html.tv-mode`
-  (3-col Main Lifts with a podium per board, centered Total, capped+centered Other Lifts &
-  Hall of Fame, hidden controls/auth/hints). `renderLeaderboard` shows a podium for every
+  (3-col Main Lifts with a podium per board, centered Total, capped+centered Other Lifts /
+  Cardio & Hall of Fame, hidden controls/auth/hints). `renderLeaderboard` shows a podium for every
   board when `app.tvMode` (not just the focused one); the podium is compacted in TV mode
   (shorter stands, smaller avatar/medal) so more ranked rows fit. Layout clips, never scrolls.
 - Pagination (so a big roster isn't cut off): `fitTvPaging` measures how many overflow
@@ -156,10 +156,13 @@ Restore: download the artifact, `gunzip`, then `psql "<target-db-url>" -f leader
 
 ## Common tasks
 - Add achievement: one entry in `js/achievements.js` (form, badges, Hall of Fame all read `ACHIEVEMENTS`).
-- Add an "other lift" (the easy path, e.g. a time-based one): one entry in `js/lifts.js` — the
-  Other-Lifts tab section, the My-PRs + admin form fields, and the `decide()` jsonb branch all
-  handle it generically. No DB or schema change (value lives in the `lifts` jsonb map; `unit:'time'`
-  stores seconds, displays mm:ss, longer ranks higher).
+- Add an "other lift" / cardio exercise (the easy path): one entry in `js/lifts.js` — the board
+  section, the My-PRs + admin form fields, and the `decide()` jsonb branch all handle it
+  generically. No DB or schema change (value lives in the `lifts` jsonb map). `unit`: `kg`
+  (one decimal), `reps` (whole number), or `time` (seconds, shown m:ss, longer ranks higher —
+  add `lowerIsBetter:true` so faster wins, e.g. a run). `group:'cardio'` puts the board on the
+  Cardio tab instead of Other Lifts (tab→container map = `OTHER_LIFT_TABS` in js/app.js); both
+  tabs share the `lifts` jsonb store.
 - Add a *main* lift (new fixed column): DB (athletes column in schema.sql + migration; `decide()` pr
   branch) and frontend (`LIFTS`/`LIFT_META`, admin + My-PRs form in index.html + logic, a leaderboard section).
 - Restyle: `styles.css`; keep the whiteboard look.

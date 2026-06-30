@@ -406,11 +406,14 @@ html.tv-mode, .tv-mode body { height: 100vh; overflow: hidden; }
 
 /* Main lifts: three equal columns, each board with its own podium. */
 .tv-mode #lifts-tab .leaderboards { grid-template-columns: repeat(3, 1fr); gap: 28px; }
-/* Other lifts: centered, capped width so a lone lift doesn't sprawl; several tile. */
-.tv-mode #other-tab .leaderboards { display: flex; flex-wrap: wrap; justify-content: center; gap: 28px; }
-.tv-mode #other-tab .leaderboard-section { flex: 1 1 420px; max-width: 760px; }
+/* Other lifts + Cardio: centered, capped width so a lone lift doesn't sprawl; several tile. */
+.tv-mode #other-tab .leaderboards,
+.tv-mode #cardio-tab .leaderboards { display: flex; flex-wrap: wrap; justify-content: center; gap: 28px; }
+.tv-mode #other-tab .leaderboard-section,
+.tv-mode #cardio-tab .leaderboard-section { flex: 1 1 420px; max-width: 760px; }
 /* All columns are equal in TV mode — drop the single default "focused" highlight. */
 .tv-mode #lifts-tab .leaderboard-section.focused,
+.tv-mode #cardio-tab .leaderboard-section.focused,
 .tv-mode #other-tab .leaderboard-section.focused {
   grid-column: auto; border-color: var(--ink); box-shadow: var(--shadow);
 }
