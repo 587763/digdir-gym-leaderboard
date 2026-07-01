@@ -166,16 +166,29 @@ class LeaderboardApp {
     }
   }
 
-  // Number inputs for the "other lifts", reused by the My-PRs (peer) and admin forms.
+  // Inputs for the "other lifts", reused by the My-PRs (peer) and admin forms.
+  // Time lifts get a text field entered as m:ss (parseLiftTime); others stay numeric.
   buildOtherLiftFields(containerId, prefix, peer, zero) {
     const el = document.getElementById(containerId);
     if (!el) return;
     el.innerHTML = window.OTHER_LIFTS.map((l) => {
-      const unit = l.unit === 'time' ? 'sec' : l.unit === 'reps' ? 'reps' : 'kg';
-      const step = l.unit === 'kg' ? '0.5' : '1';
       const tag = peer ? ' <span class="tag tag-peer">peer verify</span>' : '';
+      if (l.unit === 'time') {
+        return `<div class="form-group"><label for="${prefix}${l.id}">${l.emoji} ${this.escapeHtml(l.label)} (m:ss)${tag}</label><input type="text" inputmode="numeric" pattern="[0-9:.]*" placeholder="m:ss" id="${prefix}${l.id}"${zero ? ' value="0:00"' : ''}></div>`;
+      }
+      const unit = l.unit === 'reps' ? 'reps' : 'kg';
+      const step = l.unit === 'kg' ? '0.5' : '1';
       return `<div class="form-group"><label for="${prefix}${l.id}">${l.emoji} ${this.escapeHtml(l.label)} (${unit})${tag}</label><input type="number" id="${prefix}${l.id}" step="${step}" min="0"${zero ? ' value="0"' : ''}></div>`;
     }).join('');
+  }
+
+  // Prefill/read a single "other lift" input, formatting/parsing time as m:ss.
+  otherLiftInputValue(l, raw) {
+    return l.unit === 'time' ? window.formatLiftTime(raw) : (Number(raw) || 0);
+  }
+  readOtherLift(l, id) {
+    const raw = document.getElementById(id).value;
+    return l.unit === 'time' ? window.parseLiftTime(raw) : Math.max(0, parseFloat(raw) || 0);
   }
 
   setupEventListeners() {
@@ -292,7 +305,7 @@ class LeaderboardApp {
     document.getElementById('mineSquat').value = a.squat;
     document.getElementById('mineBench').value = a.bench;
     document.getElementById('mineDeadlift').value = a.deadlift;
-    for (const l of window.OTHER_LIFTS) document.getElementById('mineOther_' + l.id).value = a.lifts?.[l.id] ?? 0;
+    for (const l of window.OTHER_LIFTS) document.getElementById('mineOther_' + l.id).value = this.otherLiftInputValue(l, a.lifts?.[l.id] ?? 0);
     const earned = a.achievements || [];
     document.querySelectorAll('.mine-achievement-check').forEach((c) => (c.checked = earned.includes(c.value)));
     this.mineSnapshot = { name: a.name, squat: a.squat, bench: a.bench, deadlift: a.deadlift, lifts: { ...(a.lifts || {}) }, achievements: [...earned] };
@@ -312,7 +325,7 @@ class LeaderboardApp {
       if (v !== Number(snap[lift])) proposals.push(['pr', { lift, value: v }]);
     }
     for (const l of window.OTHER_LIFTS) {
-      const v = num('mineOther_' + l.id);
+      const v = this.readOtherLift(l, 'mineOther_' + l.id);
       if (v !== Number(snap.lifts?.[l.id] ?? 0)) proposals.push(['pr', { lift: l.id, value: v }]);
     }
     const checked = [...document.querySelectorAll('.mine-achievement-check')].filter((c) => c.checked).map((c) => c.value);
@@ -452,7 +465,7 @@ class LeaderboardApp {
       document.getElementById('bench').value = a.bench;
       document.getElementById('squat').value = a.squat;
       document.getElementById('deadlift').value = a.deadlift;
-      for (const l of window.OTHER_LIFTS) document.getElementById('adminOther_' + l.id).value = a.lifts?.[l.id] ?? 0;
+      for (const l of window.OTHER_LIFTS) document.getElementById('adminOther_' + l.id).value = this.otherLiftInputValue(l, a.lifts?.[l.id] ?? 0);
       document.querySelectorAll('#achievementFields .achievement-check').forEach((c) => (c.checked = (a.achievements || []).includes(c.value)));
       this.editingId = athleteId;
     } else {
@@ -473,7 +486,7 @@ class LeaderboardApp {
   async saveAthlete() {
     const num = (id) => Math.max(0, parseFloat(document.getElementById(id).value) || 0);
     const lifts = {};
-    for (const l of window.OTHER_LIFTS) lifts[l.id] = num('adminOther_' + l.id);
+    for (const l of window.OTHER_LIFTS) lifts[l.id] = this.readOtherLift(l, 'adminOther_' + l.id);
     const data = {
       name: document.getElementById('athleteName').value.trim(),
       bench: num('bench'), squat: num('squat'), deadlift: num('deadlift'),

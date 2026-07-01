@@ -8,7 +8,7 @@ Live: https://587763.github.io/digdir-gym-leaderboard/ · Repo: `587763/digdir-g
 - No build step, no backend, no framework, no npm runtime deps. Repo root deploys to
   Pages as-is. `supabase-js` is a CDN `<script>` (global `window.supabase`).
 - Vanilla JS. Script load order in index.html: config → achievements → lifts → avatar → store → app.
-  Intentional globals: `LEADERBOARD_CONFIG`, `ACHIEVEMENTS`, `OTHER_LIFTS`/`getOtherLift`/`formatLiftTime`,
+  Intentional globals: `LEADERBOARD_CONFIG`, `ACHIEVEMENTS`, `OTHER_LIFTS`/`getOtherLift`/`formatLiftTime`/`parseLiftTime`,
   `renderAvatar`, `Store`, `app`.
 - Authorization is enforced in Postgres (RLS + functions), never the client. UI gating is cosmetic.
 
@@ -28,7 +28,7 @@ js/store.js          ALL Supabase access (data/auth/realtime/RPCs); UI never cal
 js/app.js            UI controller (class LeaderboardApp, global `app`)
 js/avatar.js         renderAvatar(athlete, size) — stick figure from name
 js/achievements.js   ACHIEVEMENTS registry (extensible)
-js/lifts.js          OTHER_LIFTS registry (extra non-main exercises: id/label/emoji/unit kg|reps|time, optional group→Cardio tab) + time fmt
+js/lifts.js          OTHER_LIFTS registry (extra non-main exercises: id/label/emoji/unit kg|reps|time, optional group→Cardio tab) + time fmt/parse (m:ss)
 supabase/schema.sql  canonical fresh-install DB (tables + RLS + functions + seed)
 supabase/migrations/ hand-applied SQL for the live DB (0001 SUPERSEDED; 0002 = governance; 0003 = other lifts; 0004 = public PR history)
 .github/workflows/deploy.yml  Pages deploy on push to main
@@ -159,8 +159,9 @@ Restore: download the artifact, `gunzip`, then `psql "<target-db-url>" -f leader
 - Add an "other lift" / cardio exercise (the easy path): one entry in `js/lifts.js` — the board
   section, the My-PRs + admin form fields, and the `decide()` jsonb branch all handle it
   generically. No DB or schema change (value lives in the `lifts` jsonb map). `unit`: `kg`
-  (one decimal), `reps` (whole number), or `time` (seconds, shown m:ss, longer ranks higher —
-  add `lowerIsBetter:true` so faster wins, e.g. a run). `group:'cardio'` puts the board on the
+  (one decimal), `reps` (whole number), or `time` (stored as seconds but entered/shown as
+  m:ss — the form uses a text field + `parseLiftTime`; longer ranks higher — add
+  `lowerIsBetter:true` so faster wins, e.g. a run). `group:'cardio'` puts the board on the
   Cardio tab instead of Other Lifts (tab→container map = `OTHER_LIFT_TABS` in js/app.js); both
   tabs share the `lifts` jsonb store.
 - Add a *main* lift (new fixed column): DB (athletes column in schema.sql + migration; `decide()` pr
