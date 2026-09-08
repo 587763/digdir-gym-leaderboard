@@ -13,7 +13,7 @@ Thumbs.db
 *.log
 npm-debug.log*
 
-# Node (only used for the optional local dev server)
+# Development-only Node dependencies
 node_modules/
 
 # Personal Claude Code overrides (shared config is .claude/settings.json)

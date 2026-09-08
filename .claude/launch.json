@@ -3,8 +3,8 @@
   "configurations": [
     {
       "name": "leaderboard",
-      "runtimeExecutable": "npx",
-      "runtimeArgs": ["--yes", "serve@latest", "-l", "3000", "."],
+      "runtimeExecutable": "node",
+      "runtimeArgs": ["scripts/dev-server.mjs"],
       "port": 3000
     }
   ]

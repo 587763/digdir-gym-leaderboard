@@ -1,169 +1,133 @@
 # CLAUDE.md — agent guide: digdir-gym-leaderboard
 
-Office gym leaderboard (squat/bench/deadlift PRs + total, podium, achievements).
-Buildless static site + Supabase. Predominantly AI-maintained.
-Live: https://587763.github.io/digdir-gym-leaderboard/ · Repo: `587763/digdir-gym-leaderboard` (origin)
+Office gym leaderboard: public PRs, podiums, peer verification, achievements and progression.
+Live: https://587763.github.io/digdir-gym-leaderboard/ · Origin: `587763/digdir-gym-leaderboard`.
 
 ## Non-negotiables
-- No build step, no backend, no framework, no npm runtime deps. Repo root deploys to
-  Pages as-is. `supabase-js` is a CDN `<script>` (global `window.supabase`).
-- Vanilla JS. Script load order in index.html: config → achievements → lifts → avatar → store → app.
-  Intentional globals: `LEADERBOARD_CONFIG`, `ACHIEVEMENTS`, `OTHER_LIFTS`/`getOtherLift`/`formatLiftTime`/`parseLiftTime`,
-  `renderAvatar`, `Store`, `app`.
-- Authorization is enforced in Postgres (RLS + functions), never the client. UI gating is cosmetic.
+- Buildless static site; no backend, framework or npm runtime dependencies. Supabase is a
+  pinned CDN script with SRI. Node and dev dependencies are only for local tooling/tests.
+- Script order: config → achievements → lifts → avatar → store → history → app.
+  Public globals: `LEADERBOARD_CONFIG`, `ACHIEVEMENTS`/`getAchievement`, `OTHER_LIFTS`/
+  `getOtherLift`/`formatLiftTime`/`parseLiftTime`, `Lifts`, `renderAvatar`/`escapeAttr`,
+  `Store`, `HistoryView`, `app`.
+- All Supabase access belongs in `js/store.js`. Authorization belongs in Postgres RLS + RPCs;
+  UI gating is cosmetic. Never reintroduce GitHub-org gating (the org restricts OAuth apps).
+- After changes: remove dead code and stale references, update this guide and README, run
+  relevant tests, then check the page in a browser with screenshots and console logs.
+- Commit/push only when asked; never directly to main. Use a branch and PR. For GitHub writes,
+  prefix `gh` with `env -u GH_TOKEN` (the environment token is read-only; keyring token can write).
 
-## After any change (keep it lean)
-Sweep before finishing: remove dead code/files, fix/remove stale references, and update
-this file + README in the same change. Don't add docs/comments that restate the obvious.
-Then verify (below). Keep this file dense — facts agents need, nothing else.
+## Files
+- `index.html`: markup, accessible tabs/dialogs, CDN pin and local asset cache version (`?v=3.0.0`).
+  Bump the local asset version together when deploying coordinated JS/CSS changes.
+- `styles.css`: whiteboard theme, marker lettering, stick figures, responsive layout and TV rules.
+- `js/lifts.js`: exercise registry and pure `Lifts` parsing/formatting/ranking. Numeric-string
+  totals, competition ranks (1, 1, 3), zero/missing scores excluded. Invalid times return `NaN`.
+- `js/avatar.js`: deterministic name-derived SVG figures; `escapeAttr` escapes text and attributes.
+- `js/achievements.js`: achievement registry shared by forms and Hall of Fame.
+- `js/store.js`: auth, reads, governed writes, admin writes and realtime. Errors propagate;
+  admin writes select a row so RLS-denied no-ops cannot appear successful. Athlete edits
+  compare the opening `updated_at` value to reject concurrent edits. Auth callbacks
+  defer consumers with `setTimeout` to avoid re-entering Supabase's auth lock.
+- `js/history.js`: pure `HistoryView` rendering; groups approved PRs, escapes labels, ignores
+  invalid points and plots actual elapsed dates. Admin direct edits are not history.
+- `js/app.js`: controller, serialized/coalesced refreshes, identity generation checks, forms,
+  delegated `data-action` events, modal focus/inert management, board rendering and TV paging.
+  `app.ready` resolves after initialization; do not assert data synchronously on load.
+- `supabase/schema.sql`: destructive fresh-install schema + seed. Never run against production.
+- `supabase/migrations/`: hand-applied live upgrades. 0001 superseded; 0002 governance;
+  0003 extra lifts; 0004 public history; 0005 validation, authorization and decision hardening.
+- `scripts/dev-server.mjs`: Node static allowlist server, no caching, localhost only. Does not
+  serve `.env`, `.git`, SQL or arbitrary workspace files. `PORT` overrides 3000.
+- `tests/`: Node tests, LinkeDOM UI tests, PGlite Postgres/RLS tests, isolated browser fixtures.
+- `.github/workflows/deploy.yml`: tests PRs and main; deploys main only after tests pass.
+  Copies only public assets into the Pages artifact. No compilation/build step.
+- `.github/workflows/backup.yml`: daily table dumps, 90-day workflow artifacts.
+- `.claude/launch.json`: local preview server named `leaderboard`.
 
-## Repo map
+## Run and verify
 ```
-index.html           markup + script load order
-favicon.svg          marker-style barbell on a whiteboard tile (themed; <link rel=icon>) — source of truth for the mark
-apple-touch-icon.png 180² full-bleed raster of the favicon barbell for iOS home screen (regen note below)
-styles.css           whiteboard theme (Permanent Marker/Caveat fonts; #roughen/#squiggle SVG filters)
-js/config.js         Supabase URL + publishable key (safe to commit)
-js/store.js          ALL Supabase access (data/auth/realtime/RPCs); UI never calls Supabase directly
-js/app.js            UI controller (class LeaderboardApp, global `app`)
-js/avatar.js         renderAvatar(athlete, size) — stick figure from name
-js/achievements.js   ACHIEVEMENTS registry (extensible)
-js/lifts.js          OTHER_LIFTS registry (extra non-main exercises: id/label/emoji/unit kg|reps|time, optional group→Cardio tab) + time fmt/parse (m:ss)
-supabase/schema.sql  canonical fresh-install DB (tables + RLS + functions + seed)
-supabase/migrations/ hand-applied SQL for the live DB (0001 SUPERSEDED; 0002 = governance; 0003 = other lifts; 0004 = public PR history)
-.github/workflows/deploy.yml  Pages deploy on push to main
-.github/workflows/backup.yml  daily DB dump → 90-day artifact (needs SUPABASE_DB_URL secret)
-.claude/launch.json  preview server "leaderboard"
+npm run dev                 # Node >=22, http://localhost:3000; no install needed
+npm ci                      # development-only test dependencies
+npm test                    # no credentials, external DB or browser needed
 ```
-Icons: `favicon.svg` (rounded tile) is the mark; `theme-color` meta = `--whiteboard` (#fbfbf8).
-`apple-touch-icon.png` is a full-bleed variant (square bg, no tile border, barbell scaled ~0.9 for
-iOS's safe-area + corner mask). No ImageMagick here — regen on macOS from a full-bleed SVG with
-`qlmanage -t -s 1024 -o <dir> <full-bleed>.svg` then `sips -z 180 180 <dir>/*.png --out apple-touch-icon.png`.
+Browser checks: desktop, 390px phone, TV at 1080p and 720p; tabs, progression, forms, errors,
+keyboard focus/Escape, no console errors. Missing config/CDN leaves usable tabs and an
+explanation instead of crashing. Refresh failures preserve the last board and expose Retry.
 
-## Data model
-- `athletes` — board (verified/displayed): name, bench/squat/deadlift (fixed main-lift columns, kg),
-  lifts jsonb (`{lift_id: value}` map for "other lifts" — see js/lifts.js, no per-lift column),
-  achievements text[], avatar jsonb (reserved), timestamps.
-- `profiles` — per GitHub user: user_id, github_login, is_admin, status (pending|active|blocked), athlete_id (unique link).
-- `proposals` — pending queue + verified history: kind (claim|new_athlete|rename|pr|achievement), approval (admin|peer), athlete_id, proposer, payload jsonb, status, decided_by, decided_at.
-  - Approved `pr` rows ARE the progression history. Tapping an athlete name opens the history
-    modal (`app.openHistory`): `Store.listAthleteHistory` fetches approved `pr` proposals
-    ordered by `decided_at`, grouped per lift, drawn as a hand-rolled inline SVG sparkline
-    (`app.sparkline`, no chart lib; time lifts shown mm:ss). Public read: migration 0004
-    adds an RLS policy exposing approved `pr` proposals to anon (the rest of the table
-    stays member-only), so progression works for signed-out visitors too.
+Local-only fixtures: `/?fixture=admin`, `empty`, `error`, or `large` (65 athletes).
+The dev server replaces Store with `tests/browser-store.js` and removes the Supabase CDN
+script. Writes stay in memory. Use `?fixture=large&tv&rotate=120` for TV layout inspection.
+Fixture controls/data are never included in the deployed artifact.
 
-## Governance (RLS + propose()/decide() SECURITY DEFINER functions)
-- Read: public. Admin (`is_admin`): writes athletes directly, decides admin-proposals, manages profiles.
-- Everyone else changes the board only via proposals applied by `decide()`:
-  - pr / achievement → peer: a *different* active+linked member (or admin) verifies; approval updates the athlete; the row is the PR history.
-  - rename / new_athlete / claim → admin; approving claim/new_athlete links the proposer (status=active).
-- GitHub is login/identity only — there is no GitHub-org check (an org-gating attempt was
-  abandoned: the org restricts OAuth apps). Don't reintroduce one.
-- Bootstrap admin = GitHub login `587763`, set in `handle_new_user()` (schema.sql + migration 0002).
-  Promote others via the in-app Members panel.
-
-## Run & verify
-```
-npm run dev   # localhost:3000 (or python3 -m http.server 3000)
-```
-Done = loads in a browser, no console errors. Use the preview tooling (server `leaderboard`)
-to screenshot + read logs. Unfilled config.js → "not connected" banner, not a crash.
-Mock without a DB: `app.athletes=[...]; app.render()`.
+## Data and governance
+- `athletes`: name; fixed bench/squat/deadlift kg columns; `lifts` JSONB extra-exercise map;
+  achievements text array; reserved avatar JSONB; timestamps.
+- `profiles`: GitHub identity, is_admin, status (pending/active/blocked), unique athlete link.
+- `proposals`: claim/new_athlete/rename/pr/achievement, admin/peer approval, payload, proposer,
+  pending/approved/rejected status and decision timestamps. Approved PRs are public history;
+  remaining proposals and profiles are member-readable.
+- Active linked members propose changes to their own athlete. Another linked member or an
+  admin verifies PRs/achievements; admins can resolve their own requests. Claims, new athletes
+  and renames need an admin. Blocked accounts have no write authority, even if is_admin is true.
+- `propose()` validates payloads and serializes per-user submissions to deduplicate pending
+  retries. PR payloads include a server-owned `previous_value`. `decide()` locks the proposal,
+  rechecks the proposer's current eligibility and rejects stale PRs after a record changes.
+  Old proposals without `previous_value` remain compatible with the upgrade.
+- Names: trimmed, 1–80 characters. Scores: 0–99999; kg inputs allow one decimal, reps and
+  time inputs whole units. Zero clears an entry through the same verification process.
+  A trigger also checks direct admin athlete writes, including numeric JSONB values.
+- Bootstrap admin is GitHub login `587763`, only with GitHub provider metadata. Missing login
+  metadata creates an ordinary pending profile. Existing roles are not rewritten by 0005.
 
 ## TV / display mode
-Opt-in big-screen view for the office TV: full-width landscape layout (no page scroll, rem
-fonts scaled up) + hands-free tab cycling. Enable with `?tv` (set-and-forget for the TV
-browser) or the 📺 button in the header; `?rotate=<seconds>` overrides the 15s-per-tab budget.
-- CSS-driven: the `TV / display mode` block in styles.css keys off `html.tv-mode`
-  (3-col Main Lifts with a podium per board, centered Total, capped+centered Other Lifts /
-  Cardio & Hall of Fame, hidden controls/auth/hints). `renderLeaderboard` shows a podium for every
-  board when `app.tvMode` (not just the focused one); the podium is compacted in TV mode
-  (shorter stands, smaller avatar/medal) so more ranked rows fit. Layout clips, never scrolls.
-- Pagination (so a big roster isn't cut off): `fitTvPaging` measures how many overflow
-  rows (rank 4+, under each podium) fit beneath the podium and splits the rest into
-  screen-sized pages; the rotation steps a page at a time (`advanceTvPage`) before moving
-  to the next tab. `applyTvPage` toggles `tr.hidden` for the current slice and draws the
-  `.tv-page-dots`. A board with fewer pages pins to its last page so it never blinks empty.
-  `TV_PAGE_PAD` reserves room below for the dots. Recomputed after render, on tab switch
-  and on resize. No-op for small rosters (one page, no dots). Podium is still the biggest
-  vertical cost — `// TODO(tv)` in fitTvPaging: an even more compact dense-layout top-3
-  would free more rows.
-- Timing: `rotateMs` is the budget *per tab*, not per page, so a multi-page tab still hands
-  off on the configured cadence. `currentDwellMs` splits that budget across the tab's pages,
-  giving page 1 double the dwell of the rest (weights 2 : 1 : 1 …). Because dwells vary,
-  rotation is a self-rescheduling `setTimeout` (`scheduleTick`), not a `setInterval`; each
-  page sets `--rotate-ms` to its own dwell so the countdown bar matches.
-- Logic on `LeaderboardApp`: `applyTvMode`/`toggleTvMode`/`startRotation`/`scheduleTick`/
-  `stopRotation`/`currentDwellMs`/`advanceTab`/`advanceTvPage`/`fitTvPaging`/`applyTvPage`/
-  `rotationTabs`; state from the URL + `localStorage['lb.tv']` (+ `tvPage`/`tvPages`/`tvBoards`).
-  Rotation pauses via `visibilitychange` while the browser tab is hidden and resumes where it
-  left off (the TV cycles several pages); it skips a tick while a modal is open. Toggling syncs
-  the `?tv` URL param + localStorage.
+Enable with `?tv` or the header toggle. State is persisted defensively in `localStorage['lb.tv']`.
+`?rotate=<seconds>` sets a 5–120s budget per tab, default 15s. Page one gets double the dwell
+of later pages. Self-rescheduling timeouts pause while hidden; modals suspend advancement.
+- Every board has a podium in normal mode. Equal scores share a medal position; groups of
+  more than six medalists use the full ranked table. TV below 760px high also uses tables to
+  reserve enough vertical space. Cards stack below 960px outside TV mode.
+- `fitTvPaging` measures each row, including wrapped names. `partitionRows` packs rows into
+  pages; `applyTvPage` toggles `hidden` and page dots. Smaller boards pin to their final page.
+  Hall of Fame uses paged tables on TV. `TV_PAGE_PAD` reserves 48px for the dots.
+- Refits after render, tab switches, fonts loading and resize; changing page counts restarts
+  the rotation clock so late data does not leave a stale countdown.
 
-## Branches, PRs & deploy
-- Commit/push only when the user asks — and never straight to `main`. Work on a branch
-  (e.g. `fix/…`, `feat/…`), then open a PR with `env -u GH_TOKEN gh pr create` (GH_TOKEN is
-  read-only — see Gotchas).
-- Write the PR description for a human: clear and concise — what changed and why, not a
-  restatement of the diff. Don't attach screenshots — `gh` can't upload images from the CLI;
-  the user adds any PR visuals. (Still screenshot to *verify* GUI changes — see Run & verify.)
-- Merging the PR to `main` → Pages workflow auto-deploys (~1 min).
+## Extending
+- Achievement: add to `ACHIEVEMENTS`; forms, badges and Hall of Fame follow automatically.
+- Extra lift: add to `OTHER_LIFTS` with id/label/emoji/unit (`kg`, `reps`, `time`). Optional
+  `group:'cardio'` selects Cardio; `lowerIsBetter:true` ranks smaller positive values first.
+  No schema change: generic numeric JSONB storage. Times accept strict `m:ss` or whole seconds.
+- Main lift: requires fixed-column schema + migration and corresponding registry/forms/markup.
+- Preserve unknown extra-lift keys and unregistered achievements on admin edits; My PRs
+  must not remove achievements absent from the form. Never interpolate unescaped user text
+  into markup; `escapeAttr` / `app.escapeHtml` handle both text and quoted attributes.
 
-## Backups (free-tier has none)
-`.github/workflows/backup.yml` runs daily (cron 03:17 UTC) + on manual dispatch: `pg_dump`s
-`public.{athletes,profiles,proposals}` and uploads a gzipped `.sql` as a 90-day workflow artifact.
-Dumps are NEVER committed (public repo). Requires repo secret **`SUPABASE_DB_URL`** (full Postgres
-URI, Supabase → Project Settings → Database → Connection string) — a human adds it under
-Settings → Secrets and variables → Actions; the run errors with a clear message until it's set.
-Restore: download the artifact, `gunzip`, then `psql "<target-db-url>" -f leaderboard-backup-*.sql`
-(into a fresh project; the dump has no owner/privilege statements).
+## Database upgrades and deployment
+0005 is a transactional, idempotent upgrade; apply it before deploying these changes.
+It does not rewrite existing athlete rows, profiles, proposals or history. Tests execute
+its functions in local Postgres (PGlite); production migrations are a separate operation.
 
-## Supabase / secrets
-- `js/config.js` = project URL + **publishable** key (`sb_publishable_…`), safe to commit (RLS protects).
-  NEVER commit the `sb_secret_…`/service_role key.
-- Project ref `hqrqmkherwdkfvhjypuk`. Data-model change = edit schema.sql AND add a numbered migration file.
-- Applying a migration to the live DB (when you judge the change safe):
-  - **DB URL**: lives in `.env` at the repo root (gitignored). Format is `SUPABASE_DB_URL = postgres…`
-    **with spaces around `=`**, so `source .env` / `. ./.env` FAILS (`command not found: SUPABASE_DB_URL`).
-    Parse it instead:
-    `DBURL=$(grep -E '^[[:space:]]*SUPABASE_DB_URL[[:space:]]*=' .env | sed -E 's/^[^=]*=[[:space:]]*//; s/[[:space:]]*$//')`.
-    Never echo the value. (Also available as the same-named GitHub Actions secret.)
-  - **Tool**: there is NO local `psql`/`pg_dump`. Use the installed `supabase` CLI's direct-query path,
-    which bypasses the migration ledger: `supabase db query --db-url "$DBURL" -f supabase/migrations/000N_*.sql`.
-    Do NOT use `supabase db push` — our hand-numbered files aren't in the CLI ledger, so it would replay
-    the superseded 0001.
-  - **Gotcha**: `db query -f <file>` sends the whole file as ONE prepared statement → fails with
-    `cannot insert multiple commands into a prepared statement` if the file has >1 statement. For a
-    multi-statement migration, run each statement as its own `supabase db query "<sql>"` call
-    (or wrap the body in a single `do $$ … $$;` block).
-  - Migrations are written idempotent (`if [not] exists`, or `drop policy if exists` before `create policy`),
-    so re-running is safe. If you have no DB creds (e.g. a sandboxed run), tell the user to paste the file
-    into the Supabase SQL editor at deploy time — that's the correct fallback, not a failure.
-- New serving origin → add it in Supabase → Auth → URL Configuration (Site URL + Redirect URLs
-  `https://…/**`) or sign-in breaks. Currently allows localhost:3000 + the Pages URL.
-- supabase-js is pinned + SRI'd in index.html. Upgrade: bump version, recompute
-  `curl -sL <…/dist/umd/supabase.js> | openssl dgst -sha384 -binary | openssl base64 -A`,
-  update both attrs. Don't use the bare `@2` URL (CDN-minified → breaks SRI).
+For a live upgrade: paste the numbered migration into Supabase SQL Editor, or use a SQL
+client that supports multi-statement transactions. Never use `supabase db push`: the
+hand-numbered files are not in the CLI migration ledger and it would replay superseded 0001.
+The installed `supabase db query -f` sends one prepared statement and cannot execute this
+multi-statement migration as-is; use the SQL Editor instead of splitting its transaction.
 
-## Gotchas
-- Live DB is production — test with a throwaway athlete and clean up; don't bulk-delete real ones.
-- `gh`: env sets a read-only `GH_TOKEN` that overrides the user's token. Prefix write ops with
-  `env -u GH_TOKEN` (keyring token has repo+workflow).
-- Escape user input: `app.escapeHtml` (element text) / `escapeAttr` in avatar.js (attributes).
-- `app.athletes` is empty for a beat after load; don't assert synchronously.
-- Realtime fires `app.refreshAll()` (re-fetches own profile too, so approvals apply live).
+Production DB URL is in the gitignored `.env`, with spaces around `=`. Do not source it or
+print credentials. Config in `js/config.js` is a safe publishable key; never commit a
+service-role/secret key. Supabase project ref: `hqrqmkherwdkfvhjypuk`.
+Auth redirects allow localhost:3000 and the Pages URL. A new serving origin needs an Auth
+URL Configuration entry. Use port 3000 for real sign-in; fixtures work on any local port.
 
-## Common tasks
-- Add achievement: one entry in `js/achievements.js` (form, badges, Hall of Fame all read `ACHIEVEMENTS`).
-- Add an "other lift" / cardio exercise (the easy path): one entry in `js/lifts.js` — the board
-  section, the My-PRs + admin form fields, and the `decide()` jsonb branch all handle it
-  generically. No DB or schema change (value lives in the `lifts` jsonb map). `unit`: `kg`
-  (one decimal), `reps` (whole number), or `time` (stored as seconds but entered/shown as
-  m:ss — the form uses a text field + `parseLiftTime`; longer ranks higher — add
-  `lowerIsBetter:true` so faster wins, e.g. a run). `group:'cardio'` puts the board on the
-  Cardio tab instead of Other Lifts (tab→container map = `OTHER_LIFT_TABS` in js/app.js); both
-  tabs share the `lifts` jsonb store.
-- Add a *main* lift (new fixed column): DB (athletes column in schema.sql + migration; `decide()` pr
-  branch) and frontend (`LIFTS`/`LIFT_META`, admin + My-PRs form in index.html + logic, a leaderboard section).
-- Restyle: `styles.css`; keep the whiteboard look.
+CDN upgrade: bump the pinned supabase-js version and recompute SHA-384 on the exact UMD
+file. Never use the floating `@2` URL (CDN minification can invalidate SRI).
+
+## Backups and icons
+Daily backup uses `SUPABASE_DB_URL` Actions secret and fails clearly if missing. Dumps cover
+public athletes/profiles/proposals only; they are not complete Supabase/Auth backups. Restoring
+requires compatible functions, roles and matching auth.users IDs. Never commit dumps.
+
+`favicon.svg` is the mark; theme-color is `--whiteboard` (#fbfbf8). The 180px iOS icon is a
+full-bleed variant of it. Regenerate via macOS `qlmanage -t -s 1024` on a full-bleed SVG, then
+`sips -z 180 180` on the PNG; no ImageMagick required.

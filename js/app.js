@@ -3,16 +3,9 @@
 // approves); linked users propose PR/achievement changes (peer-verified) and name
 // changes / new athletes (admin-approved). Rules are enforced in the DB; this is UI.
 
-const LIFTS = ['squat', 'bench', 'deadlift'];
-// Height reserved at the bottom of a TV-mode tab for the page dots (so paged rows
-// never tuck under them). See fitTvPaging.
+const LIFTS = window.Lifts.main;
+const LIFT_META = window.Lifts.meta;
 const TV_PAGE_PAD = 48;
-const LIFT_META = {
-  squat: { emoji: '🦵', label: 'Squat' },
-  bench: { emoji: '🏋️', label: 'Bench Press' },
-  deadlift: { emoji: '💀', label: 'Deadlift' },
-  total: { emoji: '🏆', label: 'Total' },
-};
 
 // Extra-lift tabs: a lift's `group` (js/lifts.js; default 'other') routes its board
 // to one of these tabs, each backed by a DOM container. Both draw from athletes.lifts.
@@ -36,25 +29,28 @@ class LeaderboardApp {
     // TV / display mode: ?tv (or the saved toggle) shows a big landscape layout and
     // cycles the tabs hands-free; ?rotate=<seconds> overrides the 15s default.
     const params = new URLSearchParams(location.search);
-    this.tvMode = params.has('tv') || localStorage.getItem('lb.tv') === '1';
+    let savedTv = false;
+    try { savedTv = localStorage.getItem('lb.tv') === '1'; } catch { /* Storage may be disabled. */ }
+    this.tvMode = params.has('tv') || savedTv;
     this.rotateMs = Math.min(120000, Math.max(5000, (Number(params.get('rotate')) || 15) * 1000));
     this.rotateTimer = null;
     this.tvPage = 0;   // current page within the active tab (TV mode paginates tall boards)
     this.tvPages = 1;  // page count for the active tab, recomputed by fitTvPaging
 
-    this.init();
+    this.busyActions = new Set();
+    this.identityVersion = 0;
+    this.loading = true;
+    this.ready = this.init();
   }
 
   // --- derived state --------------------------------------------------------
   get signedIn() { return !!this.user; }
-  get isAdmin() { return !!this.profile?.is_admin; }
+  get isAdmin() { return !!this.profile?.is_admin && this.profile.status !== 'blocked'; }
   get isLinked() { return !!this.profile?.athlete_id; }
   get isActive() { return this.profile?.status === 'active' && this.isLinked; }
   get myAthleteId() { return this.profile?.athlete_id ?? null; }
 
   async init() {
-    if (!window.Store.configured) return this.showConfigBanner();
-
     this.buildAchievementFields('achievementFields');
     this.buildAchievementFields('mineAchievementFields');
     this.buildOtherLiftSections();
@@ -62,55 +58,80 @@ class LeaderboardApp {
     this.buildOtherLiftFields('adminOtherLiftFields', 'adminOther_', false, true);
     this.setupEventListeners();
 
-    await this.loadIdentity();
-    await this.loadData();
-
-    // Any DB change → re-fetch everything, INCLUDING my own profile, so an admin
-    // approving/linking me updates my permissions live without a manual refresh.
-    window.Store.subscribe(() => this.refreshAll());
-    window.Store.onAuthChange(async (session) => {
-      this.user = session?.user ?? null;
-      this.profile = this.user ? await window.Store.myProfile() : null;
-      await this.loadData();
-      this.reflectAuth();
+    this.reflectAuth();
+    this.applyTvMode(this.tvMode);
+    if (!window.Store.configured) {
+      this.loading = false;
+      this.showConfigBanner();
       this.render();
-    });
+      return;
+    }
 
-    this.reflectAuth();
-    this.applyTvMode(this.tvMode); // renders; starts tab rotation if TV mode is on
-  }
-
-  async loadIdentity() {
-    const session = await window.Store.getSession();
-    this.user = session?.user ?? null;
-    this.profile = this.user ? await window.Store.myProfile() : null;
-  }
-
-  // Re-fetch my identity + all board data, then re-render everything. Used by the
-  // realtime subscription and on tab-focus, so role/permission changes apply live.
-  async refreshAll() {
-    if (!window.Store.configured) return;
-    this.profile = this.user ? await window.Store.myProfile() : null;
-    await this.loadData();
-    this.reflectAuth();
-    this.render();
-    this.refreshOpenModals();
-  }
-
-  async loadData() {
-    try {
-      this.athletes = await window.Store.listAthletes();
-      if (this.signedIn) {
-        this.profiles = await window.Store.listProfiles();
-        this.proposals = await window.Store.listPendingProposals();
-      } else {
+    window.Store.onAuthChange((session) => {
+      if (session?.user?.id !== this.user?.id) {
+        this.identityVersion++;
+        this.user = session?.user ?? null;
+        this.profile = null;
         this.profiles = [];
         this.proposals = [];
+        this.closeAll();
+        this.reflectAuth();
       }
-    } catch (e) {
-      console.error(e);
-      this.showToast('Could not load the board', 'error');
-    }
+      this.refreshAll();
+    });
+    window.Store.subscribe(() => this.refreshAll(), (status) => {
+      this.realtimeConnected = status === 'SUBSCRIBED';
+      this.updateBoardStatus();
+      if (this.realtimeConnected) this.refreshAll();
+    });
+    await this.refreshAll();
+    document.fonts?.ready.then(() => { if (this.tvMode) this.fitTvPaging(); });
+  }
+
+  // Serialize refreshes and coalesce bursts, while discarding responses for old identities.
+  async refreshAll() {
+    if (!window.Store.configured) return;
+    this.refreshRequested = true;
+    if (this.refreshPromise) return this.refreshPromise;
+    this.refreshPromise = (async () => {
+      while (this.refreshRequested) {
+        this.refreshRequested = false;
+        const version = this.identityVersion;
+        try {
+          const session = await window.Store.getSession();
+          const user = session?.user ?? null;
+          const [athletes, profile, profiles, proposals] = await Promise.all([
+            window.Store.listAthletes(),
+            user ? window.Store.myProfile(user.id) : null,
+            user ? window.Store.listProfiles() : [],
+            user ? window.Store.listPendingProposals() : [],
+          ]);
+          if (version !== this.identityVersion) { this.refreshRequested = true; continue; }
+          Object.assign(this, { user, athletes, profile, profiles, proposals, loadError: null });
+        } catch (error) {
+          if (version !== this.identityVersion) { this.refreshRequested = true; continue; }
+          this.loadError = error;
+        }
+        this.loading = false;
+        this.reflectAuth();
+        this.render();
+        this.refreshOpenModals();
+      }
+    })().finally(() => { this.refreshPromise = null; });
+    return this.refreshPromise;
+  }
+
+  updateBoardStatus() {
+    const status = document.getElementById('boardStatus');
+    const count = document.getElementById('athleteCount');
+    count.textContent = `${this.athletes.length} ${this.athletes.length === 1 ? 'athlete' : 'athletes'} on the board`;
+    const failed = !!this.loadError;
+    status.dataset.state = failed ? 'error' : this.realtimeConnected ? 'live' : 'idle';
+    status.textContent = this.loading ? 'Opening the record book…'
+      : failed ? (this.athletes.length ? 'Updates paused · showing the last loaded board' : 'Could not load the board')
+      : !window.Store.configured ? 'Not connected'
+      : this.realtimeConnected ? 'Live from the gym' : 'Board loaded · reconnecting…';
+    document.getElementById('retryBtn').hidden = !failed;
   }
 
   // --- auth UI --------------------------------------------------------------
@@ -119,22 +140,23 @@ class LeaderboardApp {
     b.toggle('signed-in', this.signedIn);
     b.toggle('is-admin', this.isAdmin);
     b.toggle('is-active', this.isActive);
-    b.toggle('can-claim', this.signedIn && !this.isLinked);
+    b.toggle('can-claim', this.signedIn && !this.isLinked && this.profile?.status !== 'blocked');
     b.toggle('can-review', this.signedIn && (this.isAdmin || this.isActive));
 
     const area = document.getElementById('authArea');
     if (!this.signedIn) {
-      area.innerHTML = `<button id="signInBtn" class="btn btn-primary">Sign in with GitHub</button>`;
-      document.getElementById('signInBtn').onclick = () => window.Store.signIn();
+      area.innerHTML = `<button id="signInBtn" class="btn btn-primary" ${window.Store.configured ? '' : 'disabled'}>Sign in with GitHub</button>`;
+      document.getElementById('signInBtn').onclick = (e) => this.runAction('auth', e.currentTarget, () => window.Store.signIn());
       return;
     }
     const name = this.escapeHtml(window.Store.userLabel(this.user));
     let badge;
     if (this.isAdmin) badge = `<span class="auth-user">🛡️ ${name} · admin</span>`;
     else if (this.isActive) badge = `<span class="auth-user">🏋️ ${name}</span>`;
+    else if (this.profile?.status === 'blocked') badge = `<span class="auth-user view-only">${name} · blocked</span>`;
     else badge = `<span class="auth-user view-only" title="Claim an athlete and wait for an admin to approve">⏳ ${name} · awaiting a spot</span>`;
     area.innerHTML = `${badge}<button id="signOutBtn" class="btn btn-ghost">Sign out</button>`;
-    document.getElementById('signOutBtn').onclick = () => window.Store.signOut();
+    document.getElementById('signOutBtn').onclick = (e) => this.runAction('auth', e.currentTarget, () => window.Store.signOut());
   }
 
   // --- setup ----------------------------------------------------------------
@@ -146,7 +168,7 @@ class LeaderboardApp {
   }
 
   // One leaderboard section per "other lift" (js/lifts.js), grouped into its tab
-  // (Other Lifts / Cardio); the first section in each tab is focused by default.
+  // (Other Lifts / Cardio). Every board has its own podium.
   buildOtherLiftSections() {
     for (const { tab, container } of OTHER_LIFT_TABS) {
       const root = document.getElementById(container);
@@ -156,11 +178,11 @@ class LeaderboardApp {
         root.innerHTML = '<p class="empty-state">Nothing here yet.</p>';
         continue;
       }
-      root.innerHTML = lifts.map((l, i) => {
+      root.innerHTML = lifts.map((l) => {
         const head = l.unit === 'time' ? 'Time (m:ss)' : l.unit === 'reps' ? 'Reps' : 'PR (kg)';
-        return `<div class="leaderboard-section${i === 0 ? ' focused' : ''}" data-lift="${l.id}">
-          <h2 class="lift-header" data-lift="${l.id}">${l.emoji} ${this.escapeHtml(l.label)}</h2>
-          <table class="leaderboard-table" id="${l.id}Table"><thead><tr><th>Rank</th><th>Name</th><th>${head}</th></tr></thead><tbody></tbody></table>
+        return `<div class="leaderboard-section" data-lift="${l.id}">
+          <h2>${l.emoji} ${this.escapeHtml(l.label)}</h2>
+          <table class="leaderboard-table" id="${l.id}Table"><thead><tr><th scope="col">Rank</th><th scope="col">Name</th><th scope="col">${head}</th></tr></thead><tbody></tbody></table>
         </div>`;
       }).join('');
     }
@@ -174,11 +196,11 @@ class LeaderboardApp {
     el.innerHTML = window.OTHER_LIFTS.map((l) => {
       const tag = peer ? ' <span class="tag tag-peer">peer verify</span>' : '';
       if (l.unit === 'time') {
-        return `<div class="form-group"><label for="${prefix}${l.id}">${l.emoji} ${this.escapeHtml(l.label)} (m:ss)${tag}</label><input type="text" inputmode="numeric" pattern="[0-9:.]*" placeholder="m:ss" id="${prefix}${l.id}"${zero ? ' value="0:00"' : ''}></div>`;
+        return `<div class="form-group"><label for="${prefix}${l.id}">${l.emoji} ${this.escapeHtml(l.label)} (m:ss)${tag}</label><input type="text" inputmode="numeric" pattern="([0-9]+:[0-5][0-9])|[0-9]+" placeholder="m:ss" id="${prefix}${l.id}"${zero ? ' value="0:00"' : ''}></div>`;
       }
       const unit = l.unit === 'reps' ? 'reps' : 'kg';
-      const step = l.unit === 'kg' ? '0.5' : '1';
-      return `<div class="form-group"><label for="${prefix}${l.id}">${l.emoji} ${this.escapeHtml(l.label)} (${unit})${tag}</label><input type="number" id="${prefix}${l.id}" step="${step}" min="0"${zero ? ' value="0"' : ''}></div>`;
+      const step = l.unit === 'kg' ? '0.1' : '1';
+      return `<div class="form-group"><label for="${prefix}${l.id}">${l.emoji} ${this.escapeHtml(l.label)} (${unit})${tag}</label><input type="number" id="${prefix}${l.id}" step="${step}" min="0" max="99999"${zero ? ' value="0"' : ''}></div>`;
     }).join('');
   }
 
@@ -187,15 +209,23 @@ class LeaderboardApp {
     return l.unit === 'time' ? window.formatLiftTime(raw) : (Number(raw) || 0);
   }
   readOtherLift(l, id) {
-    const raw = document.getElementById(id).value;
-    return l.unit === 'time' ? window.parseLiftTime(raw) : Math.max(0, parseFloat(raw) || 0);
+    return this.readLift(l.id, id);
   }
 
   setupEventListeners() {
     document.querySelectorAll('.tab-btn').forEach((btn) =>
       btn.addEventListener('click', () => { this.switchTab(btn.dataset.tab); this.restartRotationTimer(); }));
-    document.querySelectorAll('.lift-header').forEach((h) =>
-      h.addEventListener('click', () => this.focusLift(h.dataset.lift)));
+    document.getElementById('retryBtn').onclick = () => this.refreshAll();
+    document.querySelector('.tab-navigation').addEventListener('keydown', (event) => {
+      const tabs = [...document.querySelectorAll('.tab-btn')];
+      const index = tabs.indexOf(event.target);
+      if (index < 0 || !['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
+      event.preventDefault();
+      const next = event.key === 'Home' ? 0 : event.key === 'End' ? tabs.length - 1
+        : (index + (event.key === 'ArrowRight' ? 1 : -1) + tabs.length) % tabs.length;
+      tabs[next].click();
+      tabs[next].focus();
+    });
     document.getElementById('tvModeBtn').onclick = () => this.toggleTvMode();
 
     document.getElementById('myAthleteBtn').onclick = () => this.openMine();
@@ -205,17 +235,28 @@ class LeaderboardApp {
     document.getElementById('manageAthletesBtn').onclick = () => this.openManage();
     document.getElementById('addNewAthleteBtn').onclick = () => { this.closeAll(); this.openAthleteModal(); };
 
-    document.getElementById('athleteForm').addEventListener('submit', (e) => { e.preventDefault(); this.saveAthlete(); });
-    document.getElementById('mineForm').addEventListener('submit', (e) => { e.preventDefault(); this.submitMine(); });
-    document.getElementById('claimSubmit').onclick = () => this.submitClaim();
+    document.getElementById('athleteForm').addEventListener('submit', (e) => { e.preventDefault(); this.runAction('save', e.submitter, () => this.saveAthlete()); });
+    document.getElementById('mineForm').addEventListener('submit', (e) => { e.preventDefault(); this.runAction('mine', e.submitter, () => this.submitMine()); });
+    document.getElementById('claimSubmit').onclick = (e) => this.runAction('claim', e.currentTarget, () => this.submitClaim());
     document.getElementById('athleteName').addEventListener('input', () => this.updateAvatarPreview());
+    document.getElementById('achievementFields').addEventListener('change', () => this.updateAvatarPreview());
 
     document.querySelectorAll('[data-close]').forEach((el) =>
       el.addEventListener('click', () => this.closeModal(el.dataset.close)));
     window.addEventListener('click', (e) => {
-      if (e.target.classList.contains('modal')) e.target.style.display = 'none';
+      if (e.target.classList.contains('modal')) this.closeModal(e.target.id);
     });
-    window.addEventListener('keydown', (e) => { if (e.key === 'Escape') this.closeAll(); });
+    window.addEventListener('keydown', (e) => this.handleModalKey(e));
+    document.addEventListener('click', (e) => this.handleAction(e, 'click'));
+    document.addEventListener('change', (e) => this.handleAction(e, 'change'));
+    document.querySelectorAll('.modal').forEach((modal) => {
+      const heading = modal.querySelector('h2');
+      heading.id ||= `${modal.id}Title`;
+      modal.setAttribute('role', 'dialog');
+      modal.setAttribute('aria-modal', 'true');
+      modal.setAttribute('aria-labelledby', heading.id);
+      modal.tabIndex = -1;
+    });
 
     // Fallback if a realtime event is missed: refresh when the tab regains focus.
     // Also pause/resume TV rotation so off-screen time doesn't burn through tabs.
@@ -230,14 +271,94 @@ class LeaderboardApp {
     window.addEventListener('resize', () => {
       if (!this.tvMode) return;
       clearTimeout(resizeT);
-      resizeT = setTimeout(() => this.fitTvPaging(), 150);
+      resizeT = setTimeout(() => { this.render(); this.restartRotationTimer(); }, 150);
     });
   }
 
   // --- modal plumbing -------------------------------------------------------
-  openModal(id) { document.getElementById(id).style.display = 'block'; }
-  closeModal(id) { document.getElementById(id).style.display = 'none'; }
-  closeAll() { document.querySelectorAll('.modal').forEach((m) => (m.style.display = 'none')); }
+  openModal(id) {
+    const alreadyOpen = this.anyModalOpen();
+    if (!alreadyOpen) this.modalTrigger = document.activeElement;
+    this.closeAll(false);
+    const modal = document.getElementById(id);
+    modal.style.display = 'block';
+    document.body.classList.add('modal-open');
+    [...document.querySelector('.container').children].forEach((el) => { el.inert = el !== modal; });
+    (modal.querySelector('input:not([disabled]), select, button') || modal).focus();
+  }
+  closeModal(id) {
+    document.getElementById(id).style.display = 'none';
+    if (!this.anyModalOpen()) {
+      document.body.classList.remove('modal-open');
+      [...document.querySelector('.container').children].forEach((el) => { el.inert = false; });
+      this.restoreModalFocus();
+    }
+  }
+  closeAll(restoreFocus = true) {
+    const wasOpen = this.anyModalOpen();
+    document.querySelectorAll('.modal').forEach((m) => { m.style.display = 'none'; });
+    document.body.classList.remove('modal-open');
+    [...document.querySelector('.container').children].forEach((el) => { el.inert = false; });
+    if (restoreFocus && wasOpen) this.restoreModalFocus();
+  }
+  restoreModalFocus() {
+    const trigger = this.modalTrigger?.isConnected ? this.modalTrigger
+      : [...document.querySelectorAll('.tab-content.active [data-action]')].find((el) =>
+        el.dataset.action === this.modalTrigger?.dataset.action && el.dataset.id === this.modalTrigger?.dataset.id);
+    (trigger || document.querySelector('.tab-btn.active'))?.focus();
+  }
+  handleModalKey(event) {
+    const modal = [...document.querySelectorAll('.modal')].find((m) => this.isOpen(m.id));
+    if (!modal) return;
+    if (event.key === 'Escape') { event.preventDefault(); this.closeAll(); return; }
+    if (event.key !== 'Tab') return;
+    const focusable = [...modal.querySelectorAll('button, input, select, a[href], [tabindex="0"]')]
+      .filter((el) => !el.disabled && el.getClientRects().length);
+    const first = focusable[0], last = focusable.at(-1);
+    if (!first) { event.preventDefault(); modal.focus(); }
+    else if (event.shiftKey && (document.activeElement === first || document.activeElement === modal)) {
+      event.preventDefault(); last.focus();
+    } else if (!event.shiftKey && document.activeElement === last) {
+      event.preventDefault(); first.focus();
+    }
+  }
+
+  // One delegated action map, with no executable strings in generated markup.
+  handleAction(event, type) {
+    const target = event.target.closest('[data-action]');
+    if (!target || (target.matches('input, select') ? 'change' : 'click') !== type) return;
+    const actions = {
+      history: () => this.openHistory(target.dataset.id),
+      edit: () => this.openAthleteModal(target.dataset.id),
+      delete: () => this.deleteAthlete(target.dataset.id),
+      approve: () => this.decide(target.dataset.id, true),
+      reject: () => this.decide(target.dataset.id, false),
+      link: () => this.adminLink(target.dataset.id, target.value),
+      admin: () => this.adminToggleAdmin(target.dataset.id, target.checked),
+      block: () => this.adminBlock(target.dataset.id, target.dataset.blocked === 'true'),
+    };
+    if (actions[target.dataset.action]) this.runAction(`${target.dataset.action}:${target.dataset.id}`, target, actions[target.dataset.action]);
+  }
+  async runAction(key, button, action) {
+    if (this.busyActions.has(key)) return;
+    this.busyActions.add(key);
+    if (button) { button.disabled = true; button.setAttribute('aria-busy', 'true'); }
+    try { await action(); }
+    catch (error) { this.showToast(this.errText(error), 'error'); }
+    finally {
+      this.busyActions.delete(key);
+      if (button) { button.disabled = false; button.removeAttribute('aria-busy'); }
+    }
+  }
+  readLift(lift, id) {
+    const input = document.getElementById(id);
+    const value = window.Lifts.parse(lift, input.value);
+    if (!Number.isFinite(value)) {
+      input.focus();
+      throw new Error(`${(LIFT_META[lift] || window.getOtherLift(lift)).label}: enter ${this.liftUnit(lift) === 'time' ? 'm:ss or whole seconds' : 'a valid non-negative value'} (maximum 99999).`);
+    }
+    return value;
+  }
   isOpen(id) { return document.getElementById(id).style.display === 'block'; }
   refreshOpenModals() {
     if (this.isOpen('reviewModal')) this.renderReview();
@@ -280,6 +401,8 @@ class LeaderboardApp {
   async submitClaim() {
     const athleteId = document.getElementById('claimSelect').value;
     const newName = document.getElementById('claimNewName').value.trim();
+    if (newName.length > 80) throw new Error('Names can have at most 80 characters.');
+    if (newName && athleteId) throw new Error('Choose an existing athlete or enter a new name, not both.');
     try {
       if (newName) {
         await window.Store.propose('new_athlete', null, { name: newName });
@@ -289,7 +412,7 @@ class LeaderboardApp {
         return this.showToast('Pick an athlete or enter a name', 'error');
       }
       this.closeModal('claimModal');
-      await this.loadData();
+      await this.refreshAll();
       this.showToast('Request sent — an admin will approve it', 'success');
     } catch (e) {
       this.showToast(this.errText(e), 'error');
@@ -315,13 +438,15 @@ class LeaderboardApp {
   async submitMine() {
     const a = this.athleteById(this.myAthleteId);
     const snap = this.mineSnapshot;
-    const num = (id) => Math.max(0, parseFloat(document.getElementById(id).value) || 0);
+    if (!a || !snap || !this.isActive) throw new Error('Your athlete is no longer available. Reopen My PRs.');
+    const num = (id, lift = id) => this.readLift(lift, id);
     const proposals = [];
 
     const name = document.getElementById('mineName').value.trim();
-    if (name && name !== snap.name) proposals.push(['rename', { name }]);
+    if (!name || name.length > 80) throw new Error('Enter a name between 1 and 80 characters.');
+    if (name !== snap.name) proposals.push(['rename', { name }]);
     for (const lift of LIFTS) {
-      const v = num('mine' + lift.charAt(0).toUpperCase() + lift.slice(1));
+      const v = num('mine' + lift.charAt(0).toUpperCase() + lift.slice(1), lift);
       if (v !== Number(snap[lift])) proposals.push(['pr', { lift, value: v }]);
     }
     for (const l of window.OTHER_LIFTS) {
@@ -330,15 +455,22 @@ class LeaderboardApp {
     }
     const checked = [...document.querySelectorAll('.mine-achievement-check')].filter((c) => c.checked).map((c) => c.value);
     for (const id of checked) if (!snap.achievements.includes(id)) proposals.push(['achievement', { achievement_id: id, op: 'add' }]);
-    for (const id of snap.achievements) if (!checked.includes(id)) proposals.push(['achievement', { achievement_id: id, op: 'remove' }]);
+    for (const id of snap.achievements) if (window.getAchievement(id) && !checked.includes(id)) proposals.push(['achievement', { achievement_id: id, op: 'remove' }]);
 
     if (proposals.length === 0) { this.closeModal('mineModal'); return this.showToast('No changes', 'success'); }
 
     try {
-      for (const [kind, payload] of proposals) await window.Store.propose(kind, a.id, payload);
+      for (const [kind, payload] of proposals) {
+        await window.Store.propose(kind, a.id, payload);
+        // Preserve accepted fields if a later request fails; retry only the unsent changes.
+        if (kind === 'rename') snap.name = payload.name;
+        else if (kind === 'pr' && LIFTS.includes(payload.lift)) snap[payload.lift] = payload.value;
+        else if (kind === 'pr') snap.lifts[payload.lift] = payload.value;
+        else if (payload.op === 'add') snap.achievements.push(payload.achievement_id);
+        else snap.achievements = snap.achievements.filter((id) => id !== payload.achievement_id);
+      }
       this.closeModal('mineModal');
-      await this.loadData();
-      this.render();
+      await this.refreshAll();
       const peer = proposals.filter((p) => p[0] !== 'rename').length;
       const adm = proposals.length - peer;
       this.showToast(`Submitted — ${peer ? peer + ' awaiting peer verify' : ''}${peer && adm ? ', ' : ''}${adm ? adm + ' awaiting admin' : ''}`, 'success');
@@ -365,7 +497,7 @@ class LeaderboardApp {
       case 'rename': text = `Rename to <strong>${this.escapeHtml(p.payload.name)}</strong>`; break;
       case 'new_athlete': text = `${who} wants to add athlete <strong>${this.escapeHtml(p.payload.name)}</strong>`; break;
       case 'claim': text = `${who} wants to be <strong>${aName}</strong>`; break;
-      default: text = p.kind;
+      default: text = this.escapeHtml(p.kind);
     }
     return `${tag} ${text} <span class="by">· by ${who}</span>`;
   }
@@ -378,8 +510,8 @@ class LeaderboardApp {
       <div class="review-row">
         <div class="review-desc">${this.describeProposal(p)}</div>
         <div class="review-actions">
-          <button class="btn btn-edit" onclick="app.decide('${p.id}', true)">Approve</button>
-          <button class="btn btn-danger" onclick="app.decide('${p.id}', false)">Reject</button>
+          <button class="btn btn-edit" data-action="approve" data-id="${p.id}">Approve</button>
+          <button class="btn btn-danger" data-action="reject" data-id="${p.id}">Reject</button>
         </div>
       </div>`).join('');
   }
@@ -387,9 +519,7 @@ class LeaderboardApp {
   async decide(id, approve) {
     try {
       await window.Store.decide(id, approve);
-      await this.loadData();
-      this.render();
-      this.renderReview();
+      await this.refreshAll();
       this.showToast(approve ? 'Approved' : 'Rejected', 'success');
     } catch (e) {
       this.showToast(this.errText(e), 'error');
@@ -423,9 +553,9 @@ class LeaderboardApp {
           ${linked ? `<span class="linked-to">→ ${this.escapeHtml(linked.name)}</span>` : ''}
         </div>
         <div class="user-controls">
-          <select onchange="app.adminLink('${p.user_id}', this.value)">${opts}</select>
-          <label class="form-check"><input type="checkbox" ${p.is_admin ? 'checked' : ''} onchange="app.adminToggleAdmin('${p.user_id}', this.checked)"> admin</label>
-          <button class="btn btn-ghost" onclick="app.adminBlock('${p.user_id}', ${p.status === 'blocked'})">${p.status === 'blocked' ? 'Unblock' : 'Block'}</button>
+          <select aria-label="Linked athlete for ${this.escapeHtml(p.github_login)}" data-action="link" data-id="${p.user_id}">${opts}</select>
+          <label class="form-check"><input type="checkbox" ${p.is_admin ? 'checked' : ''} data-action="admin" data-id="${p.user_id}"> admin</label>
+          <button class="btn btn-ghost" data-action="block" data-id="${p.user_id}" data-blocked="${p.status === 'blocked'}">${p.status === 'blocked' ? 'Unblock' : 'Block'}</button>
         </div>
       </div>`;
     }).join('');
@@ -434,16 +564,16 @@ class LeaderboardApp {
   async adminLink(userId, athleteId) {
     try {
       await window.Store.adminUpdateProfile(userId, { athlete_id: athleteId || null, status: athleteId ? 'active' : 'pending' });
-      await this.loadData(); this.renderUsers(); this.render();
+      await this.refreshAll();
       this.showToast('Updated', 'success');
     } catch (e) { this.showToast(this.errText(e), 'error'); }
   }
   async adminToggleAdmin(userId, val) {
-    try { await window.Store.adminUpdateProfile(userId, { is_admin: val }); await this.loadData(); this.renderUsers(); this.showToast('Updated', 'success'); }
+    try { await window.Store.adminUpdateProfile(userId, { is_admin: val }); await this.refreshAll(); this.showToast('Updated', 'success'); }
     catch (e) { this.showToast(this.errText(e), 'error'); }
   }
   async adminBlock(userId, currentlyBlocked) {
-    try { await window.Store.adminUpdateProfile(userId, { status: currentlyBlocked ? 'pending' : 'blocked' }); await this.loadData(); this.renderUsers(); this.showToast('Updated', 'success'); }
+    try { await window.Store.adminUpdateProfile(userId, { status: currentlyBlocked ? (this.profileByUser(userId)?.athlete_id ? 'active' : 'pending') : 'blocked' }); await this.refreshAll(); this.showToast('Updated', 'success'); }
     catch (e) { this.showToast(this.errText(e), 'error'); }
   }
 
@@ -460,6 +590,8 @@ class LeaderboardApp {
     form.reset();
     if (athleteId) {
       const a = this.athleteById(athleteId);
+      if (!a) throw new Error('This athlete is no longer on the board.');
+      this.editingSnapshot = structuredClone(a);
       document.getElementById('modalTitle').textContent = 'Edit athlete';
       document.getElementById('athleteName').value = a.name;
       document.getElementById('bench').value = a.bench;
@@ -471,6 +603,7 @@ class LeaderboardApp {
     } else {
       document.getElementById('modalTitle').textContent = 'Add athlete';
       this.editingId = null;
+      this.editingSnapshot = null;
     }
     this.updateAvatarPreview();
     this.openModal('athleteModal');
@@ -484,21 +617,24 @@ class LeaderboardApp {
   }
 
   async saveAthlete() {
-    const num = (id) => Math.max(0, parseFloat(document.getElementById(id).value) || 0);
-    const lifts = {};
+    const num = (id, lift = id) => this.readLift(lift, id);
+    const lifts = { ...(this.athleteById(this.editingId)?.lifts || {}) };
     for (const l of window.OTHER_LIFTS) lifts[l.id] = this.readOtherLift(l, 'adminOther_' + l.id);
     const data = {
       name: document.getElementById('athleteName').value.trim(),
       bench: num('bench'), squat: num('squat'), deadlift: num('deadlift'),
       lifts,
-      achievements: [...document.querySelectorAll('#achievementFields .achievement-check')].filter((c) => c.checked).map((c) => c.value),
+      achievements: [
+        ...(this.editingSnapshot?.achievements || []).filter((id) => !window.getAchievement(id)),
+        ...[...document.querySelectorAll('#achievementFields .achievement-check')].filter((c) => c.checked).map((c) => c.value),
+      ],
     };
-    if (!data.name) return this.showToast('Please enter a name', 'error');
+    if (!data.name || data.name.length > 80) throw new Error('Enter a name between 1 and 80 characters.');
     try {
-      if (this.editingId) await window.Store.adminUpdateAthlete(this.editingId, data);
+      if (this.editingId) await window.Store.adminUpdateAthlete(this.editingId, data, this.editingSnapshot?.updated_at);
       else await window.Store.adminCreateAthlete(data);
       this.closeModal('athleteModal');
-      await this.loadData(); this.render(); this.renderAthletesList();
+      await this.refreshAll();
       this.showToast('Saved', 'success');
     } catch (e) { this.showToast(this.errText(e), 'error'); }
   }
@@ -508,7 +644,7 @@ class LeaderboardApp {
     if (!confirm(`Delete ${a?.name ?? 'this athlete'}? This can't be undone.`)) return;
     try {
       await window.Store.adminDeleteAthlete(id);
-      await this.loadData(); this.renderAthletesList(); this.render();
+      await this.refreshAll();
       this.showToast('Deleted', 'success');
     } catch (e) { this.showToast(this.errText(e), 'error'); }
   }
@@ -524,45 +660,44 @@ class LeaderboardApp {
         <div class="athlete-card-info">
           <h3>${this.escapeHtml(a.name)}${this.badgesFor(a)}${owner ? `<span class="linked-to">@${this.escapeHtml(owner.github_login)}</span>` : ''}</h3>
           <div class="athlete-stats">
-            <span>🏋️ <strong>${a.bench.toFixed(1)}</strong></span>
-            <span>🦵 <strong>${a.squat.toFixed(1)}</strong></span>
-            <span>💀 <strong>${a.deadlift.toFixed(1)}</strong></span>
-            <span>🏆 <strong>${(a.bench + a.squat + a.deadlift).toFixed(1)}</strong></span>
+            <span>🏋️ <strong>${this.displayValue('bench', a.bench)}</strong></span>
+            <span>🦵 <strong>${this.displayValue('squat', a.squat)}</strong></span>
+            <span>💀 <strong>${this.displayValue('deadlift', a.deadlift)}</strong></span>
+            <span>🏆 <strong>${this.displayValue('total', this.valueFor(a, 'total'))}</strong></span>
             ${window.OTHER_LIFTS.map((l) => `<span>${l.emoji} <strong>${this.displayValue(l.id, this.valueFor(a, l.id))}</strong></span>`).join('')}
           </div>
         </div>
         <div class="athlete-card-actions">
-          <button class="btn btn-edit" onclick="app.openAthleteModal('${a.id}')">Edit</button>
-          <button class="btn btn-danger" onclick="app.deleteAthlete('${a.id}')">Delete</button>
+          <button class="btn btn-edit" data-action="edit" data-id="${a.id}">Edit</button>
+          <button class="btn btn-danger" data-action="delete" data-id="${a.id}">Delete</button>
         </div>
       </div>`;
     }).join('');
   }
 
-  // --- tabs / focus ---------------------------------------------------------
+  // --- tabs ---------------------------------------------------------
   switchTab(tabName) {
+    if (!document.getElementById(`${tabName}-tab`)) return;
     this.activeTab = tabName;
-    document.querySelectorAll('.tab-btn').forEach((b) => b.classList.toggle('active', b.dataset.tab === tabName));
+    document.querySelector('.skip-link').setAttribute('href', `#${tabName}-tab`);
+    document.querySelectorAll('.tab-btn').forEach((b) => {
+      const active = b.dataset.tab === tabName;
+      b.classList.toggle('active', active);
+      b.setAttribute('aria-selected', String(active));
+      b.tabIndex = active ? 0 : -1;
+    });
     document.querySelectorAll('.tab-content').forEach((c) => c.classList.remove('active'));
     document.getElementById(`${tabName}-tab`).classList.add('active');
     if (this.tvMode) { this.tvPage = 0; this.fitTvPaging(); }
   }
-  // Spotlight a lift (podium) within its own tab — works for main and other lifts.
-  focusLift(liftType) {
-    const section = document.querySelector(`.leaderboard-section[data-lift="${liftType}"]`);
-    if (!section) return;
-    const group = section.closest('.leaderboards');
-    group.querySelectorAll('.leaderboard-section').forEach((s) => s.classList.remove('focused'));
-    section.classList.add('focused');
-    this.render();
-  }
-
   // --- TV / display mode ----------------------------------------------------
   // Big landscape layout + hands-free tab cycling, toggled by ?tv or the 📺 button.
   // Rotation pauses while the browser tab is hidden (the office TV cycles between a
   // few pages) and resumes where it left off, so every tab gets airtime over time.
   applyTvMode(on) {
     this.tvMode = on;
+    document.getElementById('tvModeBtn').setAttribute('aria-pressed', String(on));
+    document.getElementById('tvModeBtn').textContent = on ? '✕ Exit TV mode' : '📺 TV mode';
     document.documentElement.classList.toggle('tv-mode', on);
     if (on) this.closeAll();
     else { this.tvPage = 0; document.querySelectorAll('.tv-page-dots').forEach((d) => d.remove()); }
@@ -597,6 +732,7 @@ class LeaderboardApp {
   // One self-rescheduling tick. Page dwells vary (see currentDwellMs), so a fixed
   // setInterval won't do — each tick schedules the next using the current dwell.
   scheduleTick() {
+    if (this.rotateTimer) clearTimeout(this.rotateTimer);
     if (!this.tvMode || document.hidden) return;
     this.restartProgress();
     this.rotateTimer = setTimeout(() => { this.advanceTab(); this.scheduleTick(); }, this.currentDwellMs());
@@ -650,31 +786,10 @@ class LeaderboardApp {
 
   // --- board rendering ------------------------------------------------------
   // lift may be a main lift, 'total', or an "other lift" id (value in athletes.lifts).
-  valueFor(a, lift) {
-    if (lift === 'total') return a.bench + a.squat + a.deadlift;
-    if (window.getOtherLift(lift)) return Number(a.lifts?.[lift] ?? 0);
-    return a[lift];
-  }
-  // Descending by value, so heavier/longer/more ranks higher — except lowerIsBetter
-  // lifts (e.g. a timed run), where a smaller value (faster) ranks higher.
-  sorted(lift) {
-    const dir = window.getOtherLift(lift)?.lowerIsBetter ? -1 : 1;
-    return [...this.athletes].sort((a, b) => dir * (this.valueFor(b, lift) - this.valueFor(a, lift)));
-  }
-
-  liftUnit(lift) { return window.getOtherLift(lift)?.unit || 'kg'; }
-  displayValue(lift, value) {
-    const unit = this.liftUnit(lift);
-    if (unit === 'time') return window.formatLiftTime(value);
-    if (unit === 'reps') return String(Math.round(Number(value) || 0));
-    return Number(value).toFixed(1);
-  }
-  displayValueUnit(lift, value) {
-    const unit = this.liftUnit(lift);
-    if (unit === 'time') return this.displayValue(lift, value);
-    if (unit === 'reps') return `${this.displayValue(lift, value)} reps`;
-    return `${this.displayValue(lift, value)} kg`;
-  }
+  valueFor(a, lift) { return window.Lifts.value(a, lift); }
+  liftUnit(lift) { return window.Lifts.unit(lift); }
+  displayValue(lift, value) { return window.Lifts.format(lift, value); }
+  displayValueUnit(lift, value) { return window.Lifts.formatUnit(lift, value); }
 
   render() {
     LIFTS.forEach((l) => this.renderLeaderboard(l));
@@ -682,6 +797,7 @@ class LeaderboardApp {
     window.OTHER_LIFTS.forEach((l) => this.renderLeaderboard(l.id));
     this.renderHallOfFame();
     this.updateReviewCount();
+    this.updateBoardStatus();
     if (this.tvMode) this.fitTvPaging();
   }
 
@@ -695,23 +811,24 @@ class LeaderboardApp {
   renderLeaderboard(liftType) {
     const section = document.querySelector(`#${liftType}Table`).closest('.leaderboard-section');
     const tbody = section.querySelector('tbody');
-    const ranked = this.sorted(liftType).filter((a) => liftType === 'total' || this.valueFor(a, liftType) > 0);
+    const ranked = window.Lifts.ranked(this.athletes, liftType);
     section.querySelector('.podium-container')?.remove();
+    section.querySelector('table').hidden = false;
 
     if (ranked.length === 0) {
-      tbody.innerHTML = `<tr><td colspan="3" class="empty-state">No entries yet.</td></tr>`;
+      tbody.innerHTML = `<tr><td colspan="3" class="empty-state">${this.loading ? 'Loading the board…' : this.loadError ? 'The board is unavailable. Try again above.' : 'A record waiting to happen.<br><span>Be the first on this board.</span>'}</td></tr>`;
       return;
     }
-    const showPodium = section.classList.contains('focused') || this.tvMode;
-    const tableAthletes = showPodium ? ranked.slice(3) : ranked;
-    const startRank = showPodium ? 4 : 1;
-    if (showPodium) this.renderPodium(section, ranked.slice(0, 3), liftType);
-
-    tbody.innerHTML = tableAthletes.map((a, i) => {
-      const rank = startRank + i;
+    // Tied medal positions share a rank. Keep the full podium group together.
+    const winners = ranked.filter((row) => row.rank <= 3);
+    const showPodium = winners.length <= 6 && (!this.tvMode || window.innerHeight >= 760);
+    if (showPodium) this.renderPodium(section, winners, liftType);
+    const tableAthletes = showPodium ? ranked.filter((row) => row.rank > 3) : ranked;
+    section.querySelector('table').hidden = tableAthletes.length === 0;
+    tbody.innerHTML = tableAthletes.map(({ athlete: a, rank }) => {
       return `<tr>
         <td><span class="rank">${this.rankDisplay(rank)}</span></td>
-        <td><button type="button" class="athlete-name athlete-link" onclick="app.openHistory('${a.id}')" title="See progression">${this.escapeHtml(a.name)}</button>${this.badgesFor(a)}${this.pendingForAthlete(a.id) ? '<span class="badge-chip pending" title="Has a pending change">⏳</span>' : ''}</td>
+        <td><button type="button" class="athlete-name athlete-link" data-action="history" data-id="${a.id}" title="See progression">${this.escapeHtml(a.name)}</button>${this.badgesFor(a)}${this.pendingForAthlete(a.id) ? '<span class="badge-chip pending" title="Has a pending change">⏳</span>' : ''}</td>
         <td><span class="pr-value">${this.displayValue(liftType, this.valueFor(a, liftType))}</span></td>
       </tr>`;
     }).join('');
@@ -720,21 +837,19 @@ class LeaderboardApp {
   renderPodium(section, top3, liftType) {
     const container = document.createElement('div');
     container.className = 'podium-container';
-    const order = [top3[1], top3[0], top3[2]];
-    const positions = ['second', 'first', 'third'];
-    const ranks = [2, 1, 3];
-    order.forEach((athlete, i) => {
-      if (!athlete) return;
+    [2, 1, 3].forEach((rank) => {
+      const athletes = top3.filter((row) => row.rank === rank);
+      if (!athletes.length) return;
       const spot = document.createElement('div');
-      spot.className = `podium-spot ${positions[i]}`;
+      spot.className = `podium-spot ${['', 'first', 'second', 'third'][rank]}`;
+      const avatarSize = this.tvMode ? 48 : 64;
       spot.innerHTML = `
         <div class="podium-athlete">
-          <div class="podium-avatar">${window.renderAvatar(athlete, this.tvMode ? 48 : 84)}</div>
-          <div class="podium-medal">${this.medalMark(ranks[i], this.tvMode ? 26 : 32)}</div>
-          <div class="podium-name"><button type="button" class="athlete-link" onclick="app.openHistory('${athlete.id}')" title="See progression">${this.escapeHtml(athlete.name)}</button></div>
-          <div class="podium-value">${this.displayValueUnit(liftType, this.valueFor(athlete, liftType))}</div>
-        </div>
-        <div class="podium-stand"><div class="podium-rank">${ranks[i]}</div></div>`;
+          <div class="podium-avatars">${athletes.map(({ athlete }) => window.renderAvatar(athlete, athletes.length > 1 ? 36 : avatarSize)).join('')}</div>
+          <div class="podium-medal">${this.medalMark(rank, this.tvMode ? 26 : 28)}</div>
+          <div class="podium-name">${athletes.map(({ athlete }) => `<button type="button" class="athlete-link" data-action="history" data-id="${athlete.id}" title="See progression">${this.escapeHtml(athlete.name)}</button>`).join('<span class="tie-join"> &amp; </span>')}</div>
+          <div class="podium-value">${this.displayValueUnit(liftType, athletes[0].value)}</div>
+        </div><div class="podium-stand"><div class="podium-rank">${rank}</div></div>`;
       container.appendChild(spot);
     });
     section.querySelector('h2').after(container);
@@ -756,16 +871,13 @@ class LeaderboardApp {
     </svg>`;
   }
 
-  // TV mode: a roster can outgrow one screen. Rather than clip the overflow rows
-  // (rank 4+ under each podium), measure how many fit beneath the podium and split
-  // the rest into screen-sized pages that the tab rotation cycles through, so every
-  // athlete gets airtime. No-op for small rosters (everything fits → a single page).
-  // Runs after render, on tab switch and on resize — never on a hidden tab.
-  // TODO(tv): the podium eats the most vertical room; a more compact top-3 in dense
-  //   layouts would free rows and shrink the page count.
+  // Fit variable-height rows (including wrapped names) into actual screen space.
+  // Short TV viewports use tables without podiums, leaving room for ranked rows.
   fitTvPaging() {
     const frame = document.querySelector('.tab-content.active');
     if (!this.tvMode || !frame) { this.tvPages = 1; return; }
+    const previousPages = this.tvPages;
+    const previousPage = this.tvPage;
     const bottom = frame.getBoundingClientRect().bottom - TV_PAGE_PAD;
     this.tvBoards = [];
     let pages = 1;
@@ -774,23 +886,36 @@ class LeaderboardApp {
       const rows = tbody && !tbody.querySelector('.empty-state') ? [...tbody.rows] : [];
       if (rows.length === 0) return;
       rows.forEach((tr) => { tr.hidden = false; }); // un-hide so we measure the full table, not a prior page
-      const rowH = rows[0].getBoundingClientRect().height || 1;
-      const perPage = Math.max(1, Math.floor((bottom - tbody.getBoundingClientRect().top) / rowH));
-      this.tvBoards.push({ rows, perPage, pages: Math.ceil(rows.length / perPage) });
-      pages = Math.max(pages, Math.ceil(rows.length / perPage));
+      const room = Math.max(1, bottom - tbody.getBoundingClientRect().top);
+      const slices = this.partitionRows(rows, room);
+      this.tvBoards.push({ rows, slices });
+      pages = Math.max(pages, slices.length);
     });
     this.tvPages = pages;
     this.tvPage = Math.min(this.tvPage, pages - 1);
     this.applyTvPage();
+    if (previousPages !== pages || previousPage !== this.tvPage) this.restartRotationTimer();
+  }
+
+  partitionRows(rows, room) {
+    const slices = [[]];
+    let height = 0;
+    for (const row of rows) {
+      const rowHeight = row.getBoundingClientRect().height || 1;
+      if (height + rowHeight > room && slices.at(-1).length) { slices.push([]); height = 0; }
+      slices.at(-1).push(row);
+      height += rowHeight;
+    }
+    return slices;
   }
 
   // Show only the current page's slice of each board's overflow rows, then draw the
   // page dots. A board with fewer pages pins to its last page, so a shorter board
   // never blinks empty while a longer one is still paging.
   applyTvPage() {
-    (this.tvBoards || []).forEach(({ rows, perPage, pages }) => {
-      const start = Math.min(this.tvPage, pages - 1) * perPage;
-      rows.forEach((tr, i) => { tr.hidden = i < start || i >= start + perPage; });
+    (this.tvBoards || []).forEach(({ rows, slices }) => {
+      const visible = new Set(slices[Math.min(this.tvPage, slices.length - 1)]);
+      rows.forEach((row) => { row.hidden = !visible.has(row); });
     });
     const frame = document.querySelector('.tab-content.active');
     if (!frame) return;
@@ -808,11 +933,13 @@ class LeaderboardApp {
     const root = document.getElementById('hallOfFame');
     root.innerHTML = window.ACHIEVEMENTS.map((ach) => {
       const achievers = this.athletes.filter((a) => (a.achievements || []).includes(ach.id)).sort((a, b) => a.name.localeCompare(b.name));
-      const body = achievers.length === 0
+      const body = this.tvMode && achievers.length > 0
+        ? `<table class="leaderboard-table"><thead><tr><th scope="col">Member</th><th scope="col">Achievement</th></tr></thead><tbody>${achievers.map((a) => `<tr><td><span class="athlete-name">${this.escapeHtml(a.name)}</span></td><td>${this.escapeHtml(ach.title)}</td></tr>`).join('')}</tbody></table>`
+        : achievers.length === 0
         ? `<div class="empty-achievement"><p>${this.escapeHtml(ach.emptyText)}</p></div>`
         : `<div class="hall-of-fame">${achievers.map((a) => `<div class="achievement-badge"><div class="badge-avatar">${window.renderAvatar(a, 66)}</div><div class="badge-name">${this.escapeHtml(a.name)}</div><div class="badge-subtitle">${this.escapeHtml(ach.title)}</div></div>`).join('')}</div>
            <div class="achievement-count">${achievers.length} ${achievers.length === 1 ? 'person has' : 'people have'} earned this</div>`;
-      return `<div class="achievement-section"><h2>${ach.emoji} ${this.escapeHtml(ach.name)}</h2><p class="achievement-description">${this.escapeHtml(ach.description)}</p>${body}</div>`;
+      return `<div class="achievement-section${this.tvMode ? ' leaderboard-section' : ''}"><h2>${ach.emoji} ${this.escapeHtml(ach.name)}</h2><p class="achievement-description">${this.escapeHtml(ach.description)}</p>${body}</div>`;
     }).join('');
   }
 
@@ -836,6 +963,7 @@ class LeaderboardApp {
   }
 
   async reloadHistory() {
+    const request = this.historyRequest = (this.historyRequest || 0) + 1;
     const id = this.historyAthleteId;
     const a = this.athleteById(id);
     const body = document.getElementById('historyBody');
@@ -843,109 +971,37 @@ class LeaderboardApp {
     try {
       const rows = await window.Store.listAthleteHistory(id);
       // Bail if the user switched/closed the modal while we were fetching.
-      if (this.historyAthleteId !== id || !this.isOpen('historyModal')) return;
+      if (request !== this.historyRequest || this.historyAthleteId !== id || !this.isOpen('historyModal')) return;
       this.renderHistory(rows);
     } catch (e) {
+      if (request !== this.historyRequest || this.historyAthleteId !== id || !this.isOpen('historyModal')) return;
       body.innerHTML = `<p class="empty-state">${this.escapeHtml(this.errText(e))}</p>`;
     }
   }
 
-  renderHistory(rows) {
-    const body = document.getElementById('historyBody');
-    const byLift = new Map();
-    for (const r of rows) {
-      const lift = r.payload?.lift;
-      if (!lift) continue;
-      if (!byLift.has(lift)) byLift.set(lift, []);
-      byLift.get(lift).push({ value: Number(r.payload.value), at: r.decided_at });
-    }
-    if (byLift.size === 0) {
-      body.innerHTML = '<p class="empty-state">No verified PRs yet — progression shows up here once PRs are peer-verified.</p>';
-      return;
-    }
-    // Main lifts first, then "other lifts", in their registry order; unknowns last.
-    const order = [...LIFTS, ...window.OTHER_LIFTS.map((l) => l.id)];
-    const liftIds = [...byLift.keys()].sort((x, y) => {
-      const ix = order.indexOf(x), iy = order.indexOf(y);
-      return (ix < 0 ? 99 : ix) - (iy < 0 ? 99 : iy);
-    });
-    body.innerHTML = liftIds.map((lid) => this.renderHistoryLift(lid, byLift.get(lid))).join('');
-  }
-
-  renderHistoryLift(lid, series) {
-    const meta = LIFT_META[lid] || window.getOtherLift(lid) || { emoji: '', label: lid };
-    const first = series[0].value;
-    const last = series[series.length - 1].value;
-    const delta = last - first;
-    // For lowerIsBetter lifts (e.g. a run) a smaller value is the improvement.
-    const improved = window.getOtherLift(lid)?.lowerIsBetter ? delta <= 0 : delta >= 0;
-    const head = series.length === 1
-      ? '<span class="history-delta first">first PR</span>'
-      : `<span class="history-delta ${improved ? 'up' : 'down'}">${this.displaySignedDelta(lid, delta)}</span>`;
-    const points = series.map((p) =>
-      `<li><span class="hist-date">${this.formatDate(p.at)}</span><span class="hist-val">${this.escapeHtml(this.displayValueUnit(lid, p.value))}</span></li>`
-    ).join('');
-    return `<div class="history-lift">
-      <div class="history-lift-head">
-        <h3>${meta.emoji} ${this.escapeHtml(meta.label)}</h3>
-        ${head}
-      </div>
-      ${this.sparkline(lid, series)}
-      <ul class="history-points">${points}</ul>
-    </div>`;
-  }
-
-  // Hand-rolled inline SVG line chart. Uniform scaling (no preserveAspectRatio
-  // tricks) so dots stay round; #squiggle gives it the whiteboard look.
-  sparkline(lid, series) {
-    const W = 320, H = 90, pad = 12;
-    const vals = series.map((s) => s.value);
-    const min = Math.min(...vals), max = Math.max(...vals);
-    const n = series.length;
-    const x = (i) => n === 1 ? W / 2 : pad + (i / (n - 1)) * (W - 2 * pad);
-    const y = (v) => max === min ? H / 2 : H - pad - ((v - min) / (max - min)) * (H - 2 * pad);
-    const dot = (s, i) => `<circle cx="${x(i).toFixed(1)}" cy="${y(s.value).toFixed(1)}" r="4"><title>${this.escapeHtml(this.formatDate(s.at) + ': ' + this.displayValueUnit(lid, s.value))}</title></circle>`;
-    const dots = series.map(dot).join('');
-    const line = n > 1
-      ? `<polyline class="spark-line" points="${series.map((s, i) => `${x(i).toFixed(1)},${y(s.value).toFixed(1)}`).join(' ')}" filter="url(#squiggle)"/>`
-      : '';
-    return `<svg class="sparkline" viewBox="0 0 ${W} ${H}" role="img" aria-label="Progression chart">${line}${dots}</svg>`;
-  }
-
-  // Signed change for the lift's unit ("+12.5 kg" / "−0:08" for time lifts).
-  displaySignedDelta(lid, delta) {
-    const sign = delta > 0 ? '+' : delta < 0 ? '−' : '';
-    const unit = this.liftUnit(lid);
-    const mag = Math.abs(delta);
-    if (unit === 'time') return `${sign}${window.formatLiftTime(mag)}`;
-    if (unit === 'reps') return `${sign}${Math.round(mag)} reps`;
-    return `${sign}${mag.toFixed(1)} kg`;
-  }
-
-  formatDate(iso) {
-    if (!iso) return '';
-    return new Date(iso).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' });
-  }
+  renderHistory(rows) { document.getElementById('historyBody').innerHTML = window.HistoryView.render(rows); }
 
   // --- misc -----------------------------------------------------------------
   showConfigBanner() {
     const banner = document.createElement('div');
     banner.className = 'config-banner';
-    banner.innerHTML = `<strong>⚙️ Not connected yet.</strong> Set your Supabase URL/key in <code>js/config.js</code> and run <code>supabase/schema.sql</code>. See the README.`;
+    banner.innerHTML = window.Store.connectionError ? this.escapeHtml(window.Store.connectionError.message) : `<strong>⚙️ Not connected yet.</strong> Set your Supabase URL/key in <code>js/config.js</code> and run <code>supabase/schema.sql</code>. See the README.`;
     document.querySelector('.container').prepend(banner);
   }
 
   errText(e) {
     const m = e?.message || String(e);
-    return m.replace(/^.*?:\s*/, '').slice(0, 140) || 'Something went wrong';
+    return m.slice(0, 220) || 'Something went wrong';
   }
-  escapeHtml(text) { const d = document.createElement('div'); d.textContent = text ?? ''; return d.innerHTML; }
+  escapeHtml(text) { return escapeAttr(text); }
   showToast(message, type = 'success') {
+    document.querySelector('.toast')?.remove();
     const toast = document.createElement('div');
+    toast.setAttribute('role', type === 'error' ? 'alert' : 'status');
     toast.className = `toast ${type}`;
     toast.textContent = message;
     document.body.appendChild(toast);
-    setTimeout(() => { toast.style.animation = 'slideInRight 0.3s ease reverse'; setTimeout(() => toast.remove(), 300); }, 3200);
+    setTimeout(() => { toast.style.animation = 'slideInRight 0.3s ease reverse'; setTimeout(() => toast.remove(), 300); }, type === 'error' ? 7000 : 4000);
   }
 }
 
