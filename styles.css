@@ -5,8 +5,8 @@
 
 :root {
   --marker-blue:  #2563eb;
-  --marker-red:   #ef4444;
-  --marker-green: #10b981;
+  --marker-red:   #b91c1c;
+  --marker-green: #15803d;
   --marker-amber: #f59e0b;
   --ink:          #1e293b;
   --ink-soft:     #475569;
@@ -27,7 +27,7 @@ body {
   color: var(--ink);
   line-height: 1.5;
   min-height: 100vh;
-  padding: 24px;
+  padding: 32px;
   background:
     radial-gradient(circle at 18% 22%, rgba(37,99,235,0.06), transparent 45%),
     radial-gradient(circle at 82% 78%, rgba(245,158,11,0.06), transparent 45%),
@@ -43,7 +43,7 @@ body::before {
   background-size: 26px 26px;
 }
 
-.container { max-width: 1400px; margin: 0 auto; }
+.container { max-width: 1440px; margin: 0 auto; }
 
 /* ---- header --------------------------------------------------------------- */
 header { margin-bottom: 28px; }
@@ -53,10 +53,10 @@ header { margin-bottom: 28px; }
 }
 .header-titles h1 {
   font-family: 'Permanent Marker', cursive;
-  font-size: clamp(2rem, 5vw, 3.2rem);
+  font-size: clamp(2rem, 3.5vw, 3.2rem);
   color: var(--marker-blue);
   letter-spacing: 1px;
-  transform: rotate(-1deg);
+  transform: rotate(-0.7deg);
   text-shadow: 2px 2px 0 rgba(37,99,235,0.12);
 }
 .subtitle {
@@ -155,7 +155,7 @@ body.is-admin   .admin-only  { display: inline-flex; }
 /* ---- leaderboards --------------------------------------------------------- */
 .leaderboards {
   display: grid; gap: 22px;
-  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 320px), 1fr));
   align-items: start;
 }
 .leaderboard-section {
@@ -166,21 +166,15 @@ body.is-admin   .admin-only  { display: inline-flex; }
 }
 .leaderboard-section:nth-child(2) { transform: rotate(0.4deg); }
 .leaderboard-section:nth-child(3) { transform: rotate(-0.2deg); }
-.leaderboard-section.focused {
-  grid-column: 1 / -1; transform: none;
-  border-color: var(--marker-blue); box-shadow: var(--shadow-lg);
-}
 .leaderboard-total { transform: none; }
 
 .leaderboard-section h2 {
   font-family: 'Permanent Marker', cursive; font-size: 1.6rem;
   margin-bottom: 12px; color: var(--ink);
 }
-.lift-header { cursor: pointer; user-select: none; transition: color .12s ease; }
-.lift-header:hover { color: var(--marker-blue); }
 
 /* ---- tables --------------------------------------------------------------- */
-.leaderboard-table { width: 100%; border-collapse: collapse; }
+.leaderboard-table { width: 100%; border-collapse: collapse; table-layout: fixed; }
 .leaderboard-table th {
   font-family: 'Indie Flower', cursive; font-size: 1rem; text-transform: uppercase;
   letter-spacing: 1px; color: var(--ink-soft); text-align: left;
@@ -201,7 +195,9 @@ body.is-admin   .admin-only  { display: inline-flex; }
 }
 .podium-spot { display: flex; flex-direction: column; align-items: center; width: 33%; max-width: 200px; }
 .podium-athlete { display: flex; flex-direction: column; align-items: center; margin-bottom: 6px; }
-.podium-avatar { line-height: 0; }
+.podium-avatars { display: flex; align-items: flex-end; justify-content: center; height: 80px; width: 100%; }
+.podium-avatars svg { max-width: 100%; min-width: 0; }
+.tie-join { font-size: 1rem; color: var(--ink-soft); }
 .podium-medal { margin-top: -6px; line-height: 0; }
 .medal-svg { display: block; }
 .podium-name { font-size: 1.3rem; font-weight: 700; text-align: center; }
@@ -209,12 +205,12 @@ body.is-admin   .admin-only  { display: inline-flex; }
 .podium-stand {
   width: 100%; border: 2px solid var(--ink); border-bottom: none;
   border-radius: 10px 10px 0 0; display: flex; align-items: flex-start;
-  justify-content: center; padding-top: 8px; color: #fff;
+  justify-content: center; padding-top: 8px; color: #473e32;
   font-family: 'Permanent Marker', cursive; font-size: 1.8rem;
 }
-.podium-spot.first  .podium-stand { height: 130px; background: var(--gold);   border-color: #d99e16; }
-.podium-spot.second .podium-stand { height: 96px;  background: var(--silver); border-color: #94a3b8; }
-.podium-spot.third  .podium-stand { height: 72px;  background: var(--bronze); border-color: #b06a44; }
+.podium-spot.first  .podium-stand { height: 86px; background: var(--gold);   border-color: #d99e16; }
+.podium-spot.second .podium-stand { height: 62px;  background: var(--silver); border-color: #94a3b8; }
+.podium-spot.third  .podium-stand { height: 44px;  background: var(--bronze); border-color: #b06a44; }
 .podium-spot.first  { order: 2; }
 .podium-spot.second { order: 1; }
 .podium-spot.third  { order: 3; }
@@ -231,23 +227,24 @@ body.is-admin   .admin-only  { display: inline-flex; }
 .modal-content {
   background: var(--whiteboard); border: 2px solid var(--ink);
   border-radius: var(--radius); box-shadow: var(--shadow-lg);
-  max-width: 640px; margin: 5vh auto; padding: 26px; position: relative;
+  max-width: 640px; margin: 3vh auto; padding: 26px; position: relative;
   animation: popIn .2s ease;
 }
 .modal-large { max-width: 760px; }
 @keyframes popIn { from { transform: scale(.96); opacity: 0; } to { transform: none; opacity: 1; } }
-.modal-content h2 { font-family: 'Permanent Marker', cursive; font-size: 1.8rem; margin-bottom: 18px; color: var(--marker-blue); }
-.close, .close-manage {
+.modal-content h2 { padding-right: 36px; font-family: 'Permanent Marker', cursive; font-size: 1.8rem; margin-bottom: 18px; color: var(--marker-blue); }
+.close {
   position: absolute; top: 14px; right: 18px; font-size: 1.8rem; cursor: pointer;
-  color: var(--ink-soft); line-height: 1;
+  color: var(--ink-soft); line-height: 1; background: transparent; border: 0; width: 40px; height: 40px;
 }
-.close:hover, .close-manage:hover { color: var(--marker-red); }
+.close:hover { color: var(--marker-red); }
 
 /* ---- forms ---------------------------------------------------------------- */
 .form-body { display: flex; gap: 22px; flex-wrap: wrap; }
 .form-fields { flex: 1 1 320px; }
 .form-row { display: flex; gap: 12px; flex-wrap: wrap; }
-.form-row .form-group { flex: 1 1 90px; }
+.form-row .form-group { flex: 1 1 90px; display: flex; flex-direction: column; min-width: 0; }
+.form-row .form-group label { flex: 1; }
 .form-group { margin-bottom: 16px; }
 .form-group label { display: block; font-size: 1.15rem; font-weight: 600; margin-bottom: 4px; color: var(--ink-soft); }
 .form-group input {
@@ -356,13 +353,85 @@ body.is-admin   .admin-only  { display: inline-flex; }
 .toast.error   { background: var(--marker-red); }
 @keyframes slideInRight { from { transform: translateX(120%); opacity: 0; } to { transform: none; opacity: 1; } }
 
+/* ---- whiteboard details and interaction ----------------------------------- */
+[hidden] { display: none !important; }
+:focus-visible { outline: 3px solid var(--marker-blue); outline-offset: 4px; }
+button, input, select { -webkit-tap-highlight-color: transparent; }
+button:disabled { cursor: wait; opacity: .6; transform: none; }
+body.modal-open { overflow: hidden; }
+.skip-link { position: fixed; left: 16px; top: -100px; z-index: 300; background: white; padding: 8px 16px; }
+.skip-link:focus { top: 12px; }
+.eyebrow { font: 700 .72rem/1.5 system-ui, sans-serif; text-transform: uppercase; letter-spacing: .18em; color: var(--ink-soft); margin-bottom: 8px; }
+.eyebrow span { color: var(--marker-blue); padding: 0 8px; }
+.header-titles h1 { display: flex; align-items: center; gap: 12px; }
+.header-titles h1 img { flex-shrink: 0; }
+.title-period { color: var(--marker-amber); margin-left: -12px; }
+.header-actions { padding-top: 24px; }
+body:not(.signed-in) .controls { display: none; }
+.board-meta { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px 20px; padding: 14px 0; border-top: 1px solid var(--line); color: var(--ink-soft); font: .78rem/1.6 system-ui, sans-serif; }
+.connection-status { display: flex; align-items: center; gap: 12px; }
+#boardStatus::before { content: ''; display: inline-block; width: 7px; height: 7px; border-radius: 50%; margin-right: 8px; background: var(--ink-soft); }
+#boardStatus[data-state="live"]::before { background: var(--marker-green); box-shadow: 0 0 0 3px #15803d12; }
+#boardStatus[data-state="error"]::before { background: var(--marker-red); }
+#retryBtn { padding: 2px 10px; font-size: 1rem; }
+.tab-navigation { gap: 6px; padding-top: 8px; border-bottom: 2px solid var(--line); }
+.tab-btn { position: relative; white-space: nowrap; border-radius: 8px 8px 0 0; }
+.tab-btn.active { background: #e9efff; box-shadow: none; }
+.tab-btn.active::after { content: ''; position: absolute; bottom: -3px; left: 12px; right: 12px; height: 3px; border-radius: 50%; background: var(--marker-blue); }
+.leaderboard-section { min-width: 0; background: rgba(255,255,255,.85); padding: 20px 16px 12px; }
+.leaderboard-section h2 { font-size: 1.5rem; padding-bottom: 12px; border-bottom: 2px solid var(--line); }
+.leaderboard-section[data-lift="bench"] h2 { color: var(--marker-blue); }
+.leaderboard-section[data-lift="squat"] h2 { color: #865023; }
+.leaderboard-section[data-lift="deadlift"] h2 { color: #62518c; }
+#lifts-tab .leaderboards, #other-tab .leaderboards { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+#total-tab .leaderboard-section, #cardio-tab .leaderboard-section { width: 100%; max-width: 820px; margin: 0 auto; }
+.leaderboard-table th:first-child { width: 52px; }
+.leaderboard-table th:last-child { width: 90px; }
+.leaderboard-table td, .leaderboard-table th { padding-left: 6px; padding-right: 6px; }
+.leaderboard-table td:nth-child(2) { overflow-wrap: anywhere; }
+.leaderboard-table tbody tr:hover { background: #2563eb06; }
+.pr-value, .podium-value { font-variant-numeric: tabular-nums; white-space: nowrap; }
+.podium-container { gap: 8px; margin: 18px 0 14px; }
+.podium-spot { min-width: 0; }
+.podium-athlete { width: 100%; }
+.podium-name { max-width: 100%; overflow-wrap: anywhere; line-height: 1.25; }
+.podium-value { margin-top: 3px; }
+.podium-stand { border-radius: 6px 8px 0 0; }
+.empty-state { padding: 40px 8px; }
+.empty-state span { font-size: 1rem; }
+.hint { font-size: 1.05rem; }
+@media (max-width: 960px) {
+  #lifts-tab .leaderboards, #other-tab .leaderboards { grid-template-columns: 1fr; }
+  .leaderboard-section { transform: none !important; }
+  .header-actions { padding-top: 0; }
+  .podium-spot { max-width: 180px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation: none !important; transition: none !important; scroll-behavior: auto !important; }
+}
+
 /* ---- responsive ----------------------------------------------------------- */
 @media (max-width: 600px) {
   body { padding: 14px; }
   .header-top { flex-direction: column; }
+  .header-titles h1 { font-size: 1.85rem; gap: 8px; }
+  .header-titles h1 img { width: 36px; height: 36px; }
+  .subtitle { font-size: 1.15rem; }
+  .tab-navigation { flex-wrap: nowrap; overflow-x: auto; }
+  .tab-btn { font-size: 1rem; padding: 10px 12px; }
+  .auth-area { flex-wrap: wrap; }
   .podium-name { font-size: 1.1rem; }
   .form-body { flex-direction: column-reverse; }
-  .avatar-preview-container { flex-basis: auto; }
+  .form-fields { flex-basis: auto; width: 100%; min-width: 0; }
+  .modal { padding: 10px; }
+  .modal-content { padding: 18px; margin: 12px auto; }
+  .modal-content h2 { font-size: 1.5rem; }
+  .athlete-card { flex-wrap: wrap; }
+  .athlete-card-info { min-width: 0; }
+  .athlete-card-actions { margin-left: auto; }
+  .avatar-preview-container { flex-basis: auto; flex-direction: row; justify-content: center; padding: 0; }
+  .avatar-preview { padding: 0; border: 0; background: none; }
+  .avatar-preview svg { width: 64px; height: 80px; }
 }
 
 /* ===========================================================================
@@ -381,7 +450,9 @@ html.tv-mode, .tv-mode body { height: 100vh; overflow: hidden; }
 .tv-mode .controls,
 .tv-mode .auth-area,
 .tv-mode .subtitle,
-.tv-mode .hint { display: none; }
+.tv-mode .hint,
+.tv-mode .eyebrow,
+.tv-mode .board-meta { display: none; }
 
 /* Compact header so the board claims the height. */
 .tv-mode header { margin-bottom: 12px; }
@@ -403,21 +474,19 @@ html.tv-mode, .tv-mode body { height: 100vh; overflow: hidden; }
 /* Active tab fills the remaining height and clips rather than scrolls. */
 .tv-mode .tab-content.active { flex: 1; min-height: 0; overflow: hidden; display: flex; flex-direction: column; position: relative; }
 .tv-mode .leaderboards { align-content: start; }
+.tv-mode .leaderboard-section { transform: none; }
+.tv-mode .leaderboard-table th:last-child { width: 110px; }
+.tv-mode .achievement-section th:first-child { width: 65%; }
+.tv-mode .achievement-section th:last-child { width: 35%; }
+.tv-mode .achievement-section td:first-child { overflow-wrap: anywhere; }
 
 /* Main lifts: three equal columns, each board with its own podium. */
 .tv-mode #lifts-tab .leaderboards { grid-template-columns: repeat(3, 1fr); gap: 28px; }
 /* Other lifts + Cardio: centered, capped width so a lone lift doesn't sprawl; several tile. */
-.tv-mode #other-tab .leaderboards,
-.tv-mode #cardio-tab .leaderboards { display: flex; flex-wrap: wrap; justify-content: center; gap: 28px; }
+.tv-mode #other-tab .leaderboards { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 28px; }
+.tv-mode #cardio-tab .leaderboards { display: flex; justify-content: center; gap: 28px; }
 .tv-mode #other-tab .leaderboard-section,
 .tv-mode #cardio-tab .leaderboard-section { flex: 1 1 420px; max-width: 760px; }
-/* All columns are equal in TV mode — drop the single default "focused" highlight. */
-.tv-mode #lifts-tab .leaderboard-section.focused,
-.tv-mode #cardio-tab .leaderboard-section.focused,
-.tv-mode #other-tab .leaderboard-section.focused {
-  grid-column: auto; border-color: var(--ink); box-shadow: var(--shadow);
-}
-
 /* Total: prominent podium + a big centered table (don't stretch one column wide). */
 .tv-mode #total-tab .leaderboards { display: block; }
 .tv-mode #total-tab .leaderboard-section { max-width: 70vw; margin: 0 auto; }
@@ -437,6 +506,7 @@ html.tv-mode, .tv-mode body { height: 100vh; overflow: hidden; }
    page (fewer, faster-cycling pages). Shorter stands + tighter stack here; the avatar
    and medal are shrunk via their size args in renderPodium (explicit SVG width/height,
    centred by construction). Still clearly a top-3 podium. */
+.tv-mode .podium-avatars { height: 60px; }
 .tv-mode .podium-athlete { margin-bottom: 2px; }
 .tv-mode .podium-medal { margin-top: -4px; }
 .tv-mode .podium-spot.first  .podium-stand { height: 80px; }

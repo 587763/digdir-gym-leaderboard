@@ -22,19 +22,57 @@ window.OTHER_LIFTS = [
 
 window.getOtherLift = (id) => window.OTHER_LIFTS.find((l) => l.id === id);
 
-// Seconds → "m:ss" (e.g. 95 → "1:35").
+// Invalid input stays invalid; never turn a typo such as "6:99" into a 6-second PR.
 window.formatLiftTime = (seconds) => {
-  const s = Math.max(0, Math.round(Number(seconds) || 0));
+  const n = Number(seconds);
+  const s = Number.isFinite(n) ? Math.max(0, Math.round(n)) : 0;
   return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
 };
-
-// "m:ss" → whole seconds (e.g. "6:30" → 390). Also accepts a bare number of
-// seconds ("390") so old habits still work. Returns 0 for blank/unparseable.
 window.parseLiftTime = (input) => {
   const str = String(input ?? '').trim();
   if (!str) return 0;
-  const m = str.match(/^(\d+):([0-5]?\d(?:\.\d+)?)$/);
-  if (m) return Math.max(0, Math.round(parseInt(m[1], 10) * 60 + parseFloat(m[2])));
-  const n = parseFloat(str);
-  return Number.isFinite(n) ? Math.max(0, Math.round(n)) : 0;
+  const match = str.match(/^(\d+):([0-5]\d)$/);
+  const seconds = match ? Number(match[1]) * 60 + Number(match[2])
+    : /^\d+$/.test(str) ? Number(str) : NaN;
+  return Number.isSafeInteger(seconds) ? seconds : NaN;
 };
+
+// Shared domain rules for tables, podiums, forms and history. No DOM or database.
+window.Lifts = (() => {
+  const main = ['squat', 'bench', 'deadlift'];
+  const meta = {
+    squat: { emoji: '🦵', label: 'Squat' },
+    bench: { emoji: '🏋️', label: 'Bench Press' },
+    deadlift: { emoji: '💀', label: 'Deadlift' },
+    total: { emoji: '🏆', label: 'Total' },
+  };
+  const number = (raw) => Number.isFinite(Number(raw)) ? Math.max(0, Number(raw)) : 0;
+  const value = (athlete, id) => id === 'total'
+    ? main.reduce((sum, lift) => sum + number(athlete[lift]), 0)
+    : number(main.includes(id) ? athlete[id] : athlete.lifts?.[id]);
+  const unit = (id) => window.getOtherLift(id)?.unit || 'kg';
+  const format = (id, raw) => unit(id) === 'time' ? window.formatLiftTime(raw)
+    : unit(id) === 'reps' ? String(Math.round(number(raw))) : number(raw).toFixed(1);
+  const formatUnit = (id, raw) => format(id, raw) + (unit(id) === 'time' ? '' : ` ${unit(id)}`);
+  const ranked = (athletes, id) => {
+    const direction = window.getOtherLift(id)?.lowerIsBetter ? 1 : -1;
+    const rows = athletes.map((athlete) => ({ athlete, value: value(athlete, id) }))
+      .filter((row) => row.value > 0)
+      .sort((a, b) => direction * (a.value - b.value) || a.athlete.name.localeCompare(b.athlete.name));
+    let rank = 0;
+    return rows.map((row, i) => {
+      if (i === 0 || row.value !== rows[i - 1].value) rank = i + 1;
+      return { ...row, rank };
+    });
+  };
+  const parse = (id, input) => {
+    const raw = String(input ?? '').trim();
+    const n = unit(id) === 'time' ? window.parseLiftTime(raw)
+      : raw === '' ? 0 : /^\d+(?:\.\d+)?$/.test(raw) ? Number(raw) : NaN;
+    if (!Number.isFinite(n) || n < 0 || n > 99999) return NaN;
+    if (unit(id) !== 'kg' && !Number.isInteger(n)) return NaN;
+    if (unit(id) === 'kg' && Math.abs(n * 10 - Math.round(n * 10)) > 0.000001) return NaN;
+    return n;
+  };
+  return { main, meta, value, unit, format, formatUnit, ranked, parse };
+})();

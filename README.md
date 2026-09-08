@@ -11,7 +11,7 @@ everyone's screens.
 - View is open to everyone. **Sign in with GitHub** to take part.
 - Changes appear in real time (nice on a wall-mounted display).
 - **Tap any athlete's name** to see their progression — a sparkline of every
-  peer-verified PR over time.
+  peer-verified PR over time. Direct admin edits are not part of that history.
 - **Putting it on a TV?** Open the board with `?tv` (e.g. the live URL + `?tv`), or hit
   the **📺 TV mode** button. You get a full-screen landscape layout that auto-cycles
   through the tabs hands-free — and pauses while the browser tab is off-screen, so it
@@ -31,11 +31,15 @@ witnesses it):
   (you can't verify your own). Until verified, the change is pending.
 - **Name changes & new athletes** need an **admin**.
 - **Admins** manage members and can edit the board directly.
+- Blocked accounts cannot submit or approve changes. Requests are validated, repeated
+  submissions are deduplicated, and stale PR requests cannot overwrite newer records.
+  Admin forms also detect concurrent edits instead of overwriting someone else’s changes.
 
 ## How it works
 
 - **Static site, no build step.** Plain HTML/CSS/vanilla JS served straight from the
-  repo root by GitHub Pages. Push to `main` → it deploys automatically.
+  repo by GitHub Pages. PRs run the test suite; pushes to `main` deploy after tests pass.
+  Only public site assets are published.
 - **[Supabase](https://supabase.com)** (hosted Postgres) provides the shared data,
   GitHub sign-in, and realtime updates. The browser talks to it directly — there is
   no server to run.
@@ -55,8 +59,25 @@ architecture, the repo map, how to run/verify locally, the deploy flow, and gotc
 Quick start:
 
 ```bash
-npm run dev      # http://localhost:3000  (or: python3 -m http.server 3000)
+npm run dev      # Node 22+, http://localhost:3000; no install needed
+npm ci           # install development-only test tools
+npm test         # frontend + local Postgres/RLS regression tests
 ```
+
+The local server serves only the website files, with caching disabled. It never exposes
+workspace files such as `.env`. To try forms without touching the real board, open
+`http://localhost:3000/?fixture=admin`. Other local fixtures: `empty`, `error`, and `large`
+(65 athletes; combine with `&tv&rotate=120` to inspect TV pagination). All fixture writes
+stay in memory, and fixtures are excluded from the deployed site.
+
+The boards use shared ranks for ties (1, 1, 3). A zero value means no entry. Enter weights
+to one decimal, repetitions as whole numbers, and times as `m:ss` or whole seconds.
+Keyboard users can move between tabs with arrow keys and close dialogs with Escape.
+
+For an existing database, apply
+[`0005_governance_hardening.sql`](supabase/migrations/0005_governance_hardening.sql)
+in the Supabase SQL Editor before deploying this version. It preserves existing data.
+For a fresh installation, use `supabase/schema.sql` instead; that file resets the tables.
 
 ## Backups
 
@@ -70,8 +91,10 @@ It authenticates via the `SUPABASE_DB_URL` repository secret (the project's full
 connection string — full DB access, so it lives only in Actions secrets). If that secret
 is ever missing, the workflow fails fast with a message saying so.
 
-To restore: download a backup artifact, `gunzip` it, and load it into a (fresh) project
-with `psql "<target-connection-string>" -f leaderboard-backup-*.sql`.
+To restore: download a backup artifact, `gunzip` it, and load it into a compatible project
+with `psql "<target-connection-string>" -f leaderboard-backup-*.sql`. These are public-table
+backups, not full Supabase backups: the target needs compatible functions and roles, plus
+the matching `auth.users` records referenced by the profiles. See the agent guide.
 
 ## License
 

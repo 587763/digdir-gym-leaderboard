@@ -1,50 +1,6 @@
--- Digdir Gym Leaderboard — full database schema (fresh install).
--- Paste into Supabase → SQL Editor → Run. Recreates everything from scratch.
--- For an EXISTING database, use the incremental files in supabase/migrations/ instead.
---
--- Governance model: GitHub login for identity; an admin (bootstrapped below) approves
--- people and links each to one athlete; PR/achievement changes are peer-verified;
--- name changes / new athletes are admin-approved. Enforced by RLS + functions.
-
--- ───────────────────────────────────────────────────────────────────────────
--- Athletes (the board)
--- ───────────────────────────────────────────────────────────────────────────
-drop table if exists public.proposals cascade;
-drop table if exists public.profiles cascade;
-drop table if exists public.athletes cascade;
-
-create table public.athletes (
-  id           uuid primary key default gen_random_uuid(),
-  name         text not null,
-  bench        numeric(6,1) not null default 0 check (bench    >= 0),
-  squat        numeric(6,1) not null default 0 check (squat    >= 0),
-  deadlift     numeric(6,1) not null default 0 check (deadlift >= 0),
-  lifts        jsonb not null default '{}'::jsonb,   -- "other lifts" map: lift_id -> value (see js/lifts.js)
-  achievements text[] not null default '{}',
-  avatar       jsonb not null default '{}'::jsonb,   -- reserved (future avatar customizer)
-  created_at   timestamptz not null default now(),
-  updated_at   timestamptz not null default now()
-);
-
-create or replace function public.touch_updated_at()
-returns trigger language plpgsql as $$
-begin new.updated_at = now(); return new; end; $$;
-create trigger athletes_touch_updated_at
-  before update on public.athletes for each row execute function public.touch_updated_at();
-
--- ───────────────────────────────────────────────────────────────────────────
--- Profiles (one per GitHub user) + signup trigger / admin bootstrap
--- ───────────────────────────────────────────────────────────────────────────
-create table public.profiles (
-  user_id      uuid primary key references auth.users(id) on delete cascade,
-  github_login text,
-  display_name text,
-  is_admin     boolean not null default false,
-  status       text not null default 'pending' check (status in ('pending','active','blocked')),
-  athlete_id   uuid references public.athletes(id) on delete set null,
-  created_at   timestamptz not null default now()
-);
-create unique index profiles_athlete_unique on public.profiles(athlete_id) where athlete_id is not null;
+-- Harden validation and authorization; serialize decisions and deduplicate retries.
+-- Existing athletes, profiles and history are preserved. Apply as one transaction.
+begin;
 
 create or replace function public.handle_new_user()
 returns trigger language plpgsql security definer set search_path = public as $$
@@ -58,63 +14,12 @@ begin
   on conflict (user_id) do nothing;
   return new;
 end; $$;
-drop trigger if exists on_auth_user_created on auth.users;
-create trigger on_auth_user_created
-  after insert on auth.users for each row execute function public.handle_new_user();
 
--- ───────────────────────────────────────────────────────────────────────────
--- Helper functions
--- ───────────────────────────────────────────────────────────────────────────
 create or replace function public.is_admin()
 returns boolean language sql security definer stable set search_path = public as $$
   select coalesce((select is_admin and status <> 'blocked' from public.profiles where user_id = auth.uid()), false);
 $$;
-create or replace function public.is_active_linked()
-returns boolean language sql security definer stable set search_path = public as $$
-  select coalesce((select status='active' and athlete_id is not null
-                   from public.profiles where user_id = auth.uid()), false);
-$$;
 
--- ───────────────────────────────────────────────────────────────────────────
--- Proposals (pending-change queue + verified-change history)
--- ───────────────────────────────────────────────────────────────────────────
-create table public.proposals (
-  id          uuid primary key default gen_random_uuid(),
-  kind        text not null check (kind in ('claim','new_athlete','rename','pr','achievement')),
-  approval    text not null check (approval in ('admin','peer')),
-  athlete_id  uuid references public.athletes(id) on delete cascade,
-  proposer    uuid not null references public.profiles(user_id) on delete cascade,
-  payload     jsonb not null default '{}'::jsonb,
-  status      text not null default 'pending' check (status in ('pending','approved','rejected')),
-  decided_by  uuid references public.profiles(user_id),
-  decided_at  timestamptz,
-  created_at  timestamptz not null default now()
-);
-
--- ───────────────────────────────────────────────────────────────────────────
--- Row Level Security
--- ───────────────────────────────────────────────────────────────────────────
-alter table public.athletes  enable row level security;
-alter table public.profiles  enable row level security;
-alter table public.proposals enable row level security;
-
-create policy "Public read access" on public.athletes for select using (true);
-create policy "admins insert athletes" on public.athletes for insert to authenticated with check (public.is_admin());
-create policy "admins update athletes" on public.athletes for update to authenticated using (public.is_admin()) with check (public.is_admin());
-create policy "admins delete athletes" on public.athletes for delete to authenticated using (public.is_admin());
-
-create policy "profiles readable by authenticated" on public.profiles for select to authenticated using (true);
-create policy "admins manage profiles" on public.profiles for update to authenticated using (public.is_admin()) with check (public.is_admin());
-
-create policy "proposals readable by authenticated" on public.proposals for select to authenticated using (true);
--- Approved PRs are public so the progression charts work for signed-out visitors.
--- Narrow on purpose; pending/rejected and other kinds stay member-only (policies OR).
-create policy "approved PRs are public history" on public.proposals for select using (status = 'approved' and kind = 'pr');
-
--- ───────────────────────────────────────────────────────────────────────────
--- Governed write paths
--- ───────────────────────────────────────────────────────────────────────────
--- Apply the same basic validation to governed and direct admin writes.
 create or replace function public.validate_athlete_values()
 returns trigger language plpgsql set search_path = public as $$
 declare entry record;
@@ -141,9 +46,6 @@ begin
   end if;
   return new;
 end; $$;
-drop trigger if exists athletes_validate_values on public.athletes;
-create trigger athletes_validate_values before insert or update on public.athletes
-  for each row execute function public.validate_athlete_values();
 
 create or replace function public.propose(p_kind text, p_athlete uuid, p_payload jsonb)
 returns uuid language plpgsql security definer set search_path = public as $$
@@ -304,18 +206,11 @@ begin
   update public.proposals set status='approved', decided_by=uid, decided_at=now() where id = p_id;
 end; $$;
 
+drop trigger if exists athletes_validate_values on public.athletes;
+create trigger athletes_validate_values before insert or update on public.athletes
+  for each row execute function public.validate_athlete_values();
+
 create index if not exists proposals_pending_created on public.proposals(created_at) where status = 'pending';
 create index if not exists proposals_history_athlete on public.proposals(athlete_id, decided_at) where status = 'approved' and kind = 'pr';
 
--- ───────────────────────────────────────────────────────────────────────────
--- Realtime + seed
--- ───────────────────────────────────────────────────────────────────────────
-alter publication supabase_realtime add table public.athletes;
-alter publication supabase_realtime add table public.proposals;
-alter publication supabase_realtime add table public.profiles;
-
-insert into public.athletes (name, bench, squat, deadlift, achievements, lifts) values
-  ('Alexander', 132.5, 120.0, 137.5, '{gripper90kg}', '{"deadhang": 95}'),
-  ('Daniel',    110.0, 137.5, 160.0, '{}',            '{"deadhang": 72}'),
-  ('Hallvard',  110.0,  80.0,  90.0, '{}',            '{}'),
-  ('Jens',      137.5,   0.0,   0.0, '{}',            '{}');
+commit;

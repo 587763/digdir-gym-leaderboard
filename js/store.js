@@ -4,27 +4,33 @@
 
 (function () {
   const cfg = window.LEADERBOARD_CONFIG || {};
-  const configured =
+  const hasConfig =
     cfg.SUPABASE_URL &&
     cfg.SUPABASE_ANON_KEY &&
     !cfg.SUPABASE_URL.includes('YOUR_PROJECT_REF') &&
     !cfg.SUPABASE_ANON_KEY.includes('YOUR_ANON');
 
   let client = null;
-  if (configured) {
-    client = window.supabase.createClient(cfg.SUPABASE_URL, cfg.SUPABASE_ANON_KEY, {
-      auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true },
-    });
+  let connectionError = null;
+  if (hasConfig && window.supabase?.createClient) {
+    try {
+      client = window.supabase.createClient(cfg.SUPABASE_URL, cfg.SUPABASE_ANON_KEY, {
+        auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true },
+      });
+    } catch (error) { connectionError = error; }
+  } else if (hasConfig) {
+    connectionError = new Error('The connection library could not load. Check your connection and reload.');
   }
 
   window.Store = {
-    configured,
-    client,
+    configured: !!client,
+    connectionError,
 
     // --- auth ---------------------------------------------------------------
     async getSession() {
       if (!client) return null;
-      const { data } = await client.auth.getSession();
+      const { data, error } = await client.auth.getSession();
+      if (error) throw error;
       return data.session ?? null;
     },
 
@@ -36,20 +42,26 @@
 
     async signIn() {
       if (!client) return;
-      await client.auth.signInWithOAuth({
+      const { error } = await client.auth.signInWithOAuth({
         provider: 'github',
         options: { redirectTo: window.location.origin + window.location.pathname },
       });
+      if (error) throw error;
     },
 
     async signOut() {
       if (!client) return;
-      await client.auth.signOut();
+      const { error } = await client.auth.signOut();
+      if (error) throw error;
     },
 
     onAuthChange(cb) {
       if (!client) return;
-      client.auth.onAuthStateChange((_event, session) => cb(session ?? null));
+      // Leave the auth callback's lock before any consumer makes a Supabase call.
+      const { data } = client.auth.onAuthStateChange((event, session) => {
+        setTimeout(() => cb(session ?? null, event), 0);
+      });
+      return () => data.subscription.unsubscribe();
     },
 
     // --- reads --------------------------------------------------------------
@@ -61,14 +73,12 @@
     },
 
     // My own profile row (role/status/link). Null if signed out or not yet created.
-    async myProfile() {
+    async myProfile(uid) {
       if (!client) return null;
-      const { data } = await client.auth.getSession();
-      const uid = data.session?.user?.id;
       if (!uid) return null;
       const { data: prof, error } = await client
         .from('profiles').select('*').eq('user_id', uid).maybeSingle();
-      if (error) return null;
+      if (error) throw error;
       return prof;
     },
 
@@ -76,7 +86,7 @@
     async listProfiles() {
       if (!client) return [];
       const { data, error } = await client.from('profiles').select('*');
-      if (error) return [];
+      if (error) throw error;
       return data;
     },
 
@@ -85,12 +95,12 @@
       if (!client) return [];
       const { data, error } = await client
         .from('proposals').select('*').eq('status', 'pending').order('created_at');
-      if (error) return [];
+      if (error) throw error;
       return data;
     },
 
     // An athlete's verified PR history (approved 'pr' proposals), oldest → newest.
-    // The progression view reads this. Authenticated only (RLS gates proposals reads).
+    // Approved PRs are publicly readable through RLS (migration 0004).
     async listAthleteHistory(athleteId) {
       if (!client) return [];
       const { data, error } = await client
@@ -120,7 +130,7 @@
 
     // --- admin-only direct writes (RLS gates these to admins) ---------------
     async adminUpdateProfile(userId, patch) {
-      const { error } = await client.from('profiles').update(patch).eq('user_id', userId);
+      const { error } = await client.from('profiles').update(patch).eq('user_id', userId).select('user_id').single();
       if (error) throw error;
     },
     async adminCreateAthlete(athlete) {
@@ -128,24 +138,28 @@
       if (error) throw error;
       return data;
     },
-    async adminUpdateAthlete(id, patch) {
-      const { error } = await client.from('athletes').update(patch).eq('id', id);
+    async adminUpdateAthlete(id, patch, expectedUpdatedAt) {
+      let query = client.from('athletes').update(patch).eq('id', id);
+      if (expectedUpdatedAt) query = query.eq('updated_at', expectedUpdatedAt);
+      const { error } = await query.select('id').single();
+      if (error?.code === 'PGRST116') throw new Error('This athlete changed or your access expired. Reopen the editor and try again.');
       if (error) throw error;
     },
     async adminDeleteAthlete(id) {
-      const { error } = await client.from('athletes').delete().eq('id', id);
+      const { error } = await client.from('athletes').delete().eq('id', id).select('id').single();
       if (error) throw error;
     },
 
     // --- realtime -----------------------------------------------------------
-    subscribe(cb) {
+    subscribe(cb, onStatus) {
       if (!client) return;
-      client
+      const channel = client
         .channel('board-changes')
         .on('postgres_changes', { event: '*', schema: 'public', table: 'athletes' }, cb)
         .on('postgres_changes', { event: '*', schema: 'public', table: 'proposals' }, cb)
         .on('postgres_changes', { event: '*', schema: 'public', table: 'profiles' }, cb)
-        .subscribe();
+        .subscribe(onStatus);
+      return () => client.removeChannel(channel);
     },
   };
 })();
