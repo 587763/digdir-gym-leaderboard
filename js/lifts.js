@@ -48,7 +48,8 @@ window.Lifts = (() => {
   };
   const number = (raw) => Number.isFinite(Number(raw)) ? Math.max(0, Number(raw)) : 0;
   const value = (athlete, id) => id === 'total'
-    ? main.reduce((sum, lift) => sum + number(athlete[lift]), 0)
+    // Sum integer tenths so equal decimal totals also share an exact rank.
+    ? main.reduce((sum, lift) => sum + Math.round(number(athlete[lift]) * 10), 0) / 10
     : number(main.includes(id) ? athlete[id] : athlete.lifts?.[id]);
   const unit = (id) => window.getOtherLift(id)?.unit || 'kg';
   const format = (id, raw) => unit(id) === 'time' ? window.formatLiftTime(raw)

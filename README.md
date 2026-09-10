@@ -16,9 +16,12 @@ everyone's screens.
   the **📺 TV mode** button. You get a full-screen landscape layout that auto-cycles
   through the tabs hands-free — and pauses while the browser tab is off-screen, so it
   plays nicely with a screen that rotates between several pages. A big roster is paged
-  through automatically — a tab with more athletes than fit splits its time across pages,
-  so nobody gets cut off and tabs still switch on the same cadence. Add `&rotate=20` to
-  change the seconds per tab (default 15).
+  through automatically. Add `&rotate=20` to change the target seconds per tab (default
+  15). Large rosters extend that time so every page gets at least five seconds to read;
+  the first page gets double the time. Podium steps scale with their numbers when Chrome
+  zoom changes, and crowded screens use complete ranked tables when podiums leave too
+  little room. Connection trouble stays visible, and the board checks for missed updates
+  every minute while the page is visible.
 
 ## Who can change what
 
@@ -67,12 +70,17 @@ npm test         # frontend + local Postgres/RLS regression tests
 The local server serves only the website files, with caching disabled. It never exposes
 workspace files such as `.env`. To try forms without touching the real board, open
 `http://localhost:3000/?fixture=admin`. Other local fixtures: `empty`, `error`, and `large`
-(65 athletes; combine with `&tv&rotate=120` to inspect TV pagination). All fixture writes
+(65 athletes; combine with `&tv&rotate=120` to inspect TV pagination), and `layout`
+(long medalist names and maximum scores). All fixture writes
 stay in memory, and fixtures are excluded from the deployed site.
 
 The boards use shared ranks for ties (1, 1, 3). A zero value means no entry. Enter weights
 to one decimal, repetitions as whole numbers, and times as `m:ss` or whole seconds.
 Keyboard users can move between tabs with arrow keys and close dialogs with Escape.
+Equal decimal totals share the same rank. TV rotation pauses while a dialog is open.
+
+The [September 2026 repository review](REVIEW.md) records the display fixes, verification,
+and recommended database and maintenance follow-ups.
 
 For an existing database, apply
 [`0005_governance_hardening.sql`](supabase/migrations/0005_governance_hardening.sql)
