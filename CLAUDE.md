@@ -18,7 +18,7 @@ Live: https://587763.github.io/digdir-gym-leaderboard/ · Origin: `587763/digdir
   prefix `gh` with `env -u GH_TOKEN` (the environment token is read-only; keyring token can write).
 
 ## Files
-- `index.html`: markup, accessible tabs/dialogs, CDN pin and local asset cache version (`?v=3.0.0`).
+- `index.html`: markup, accessible tabs/dialogs, CDN pin and local asset cache version (`?v=3.0.1`).
   Bump the local asset version together when deploying coordinated JS/CSS changes.
 - `styles.css`: whiteboard theme, marker lettering, stick figures, responsive layout and TV rules.
 - `js/lifts.js`: exercise registry and pure `Lifts` parsing/formatting/ranking. Numeric-string
@@ -33,6 +33,8 @@ Live: https://587763.github.io/digdir-gym-leaderboard/ · Origin: `587763/digdir
   invalid points and plots actual elapsed dates. Admin direct edits are not history.
 - `js/app.js`: controller, serialized/coalesced refreshes, identity generation checks, forms,
   delegated `data-action` events, modal focus/inert management, board rendering and TV paging.
+  Reconciles every 60s while visible and on browser online/focus; unchanged refreshes preserve
+  rendered controls and open history. Linking a blocked profile preserves its blocked status.
   `app.ready` resolves after initialization; do not assert data synchronously on load.
 - `supabase/schema.sql`: destructive fresh-install schema + seed. Never run against production.
 - `supabase/migrations/`: hand-applied live upgrades. 0001 superseded; 0002 governance;
@@ -55,7 +57,8 @@ Browser checks: desktop, 390px phone, TV at 1080p and 720p; tabs, progression, f
 keyboard focus/Escape, no console errors. Missing config/CDN leaves usable tabs and an
 explanation instead of crashing. Refresh failures preserve the last board and expose Retry.
 
-Local-only fixtures: `/?fixture=admin`, `empty`, `error`, or `large` (65 athletes).
+Local-only fixtures: `/?fixture=admin`, `empty`, `error`, `large` (65 athletes), or `layout`
+(long medalist names and maximum scores). TV fixture labels do not consume board height.
 The dev server replaces Store with `tests/browser-store.js` and removes the Supabase CDN
 script. Writes stay in memory. Use `?fixture=large&tv&rotate=120` for TV layout inspection.
 Fixture controls/data are never included in the deployed artifact.
@@ -82,16 +85,23 @@ Fixture controls/data are never included in the deployed artifact.
 
 ## TV / display mode
 Enable with `?tv` or the header toggle. State is persisted defensively in `localStorage['lb.tv']`.
-`?rotate=<seconds>` sets a 5–120s budget per tab, default 15s. Page one gets double the dwell
-of later pages. Self-rescheduling timeouts pause while hidden; modals suspend advancement.
+`?rotate=<seconds>` sets a 5–120s target budget per tab, default 15s. Multi-page tabs give
+page one double the dwell of later pages. Later pages get at least 5s (page one 10s),
+extending the target for large rosters; a single page still respects a 5s target.
+Timeouts pause while hidden or a modal is open; closing it starts a fresh dwell.
 - Every board has a podium in normal mode. Equal scores share a medal position; groups of
   more than six medalists use the full ranked table. TV below 760px high also uses tables to
-  reserve enough vertical space. Cards stack below 960px outside TV mode.
+  reserve enough vertical space. Above that cutoff, measure podiums and switch to complete
+  tables if there is insufficient room for up to two ranked rows. Reconsider after refits.
+  Steps, padding and rank type share rem scaling with explicit line-height and minimum
+  height. Table columns scale with text; totals reserve six digits. Cards stack below 960px outside TV mode.
 - `fitTvPaging` measures each row, including wrapped names. `partitionRows` packs rows into
   pages; `applyTvPage` toggles `hidden` and page dots. Smaller boards pin to their final page.
   Hall of Fame uses paged tables on TV. `TV_PAGE_PAD` reserves 48px for the dots.
 - Refits after render, tab switches, fonts loading and resize; changing page counts restarts
   the rotation clock so late data does not leave a stale countdown.
+- Connection warnings and Retry remain visible in the TV footer reserve. See `REVIEW.md`
+  for the review scope, remaining follow-ups and browser verification matrix.
 
 ## Extending
 - Achievement: add to `ACHIEVEMENTS`; forms, badges and Hall of Fame follow automatically.

@@ -6,6 +6,11 @@
     id:`athlete-${i}`,name:names[i] || `Athlete ${i + 1}`,bench:140-i,squat:160-i,deadlift:180-i,
     lifts:{deadhang:90+i,pullups:12,run1k:240+i},achievements:['gripper90kg'],
   }));
+  if (fixture === 'layout') athletes = athletes.map((a, i) => ({
+    ...a, name: i < 3 ? `${'Longathletename'.repeat(4)} ${i + 1}` : a.name,
+    bench: 99999 - i / 10, squat: 99999 - i / 10, deadlift: 99999 - i / 10,
+    lifts: {deadhang:99999 - i, pullups:99999 - i, pushups:99999 - i, run1k:99999 - i},
+  }));
   const profile = {user_id:'admin',github_login:'preview-admin',is_admin:true,status:'active',athlete_id:'athlete-0'};
   let proposals = [{id:'proposal-1',kind:'pr',approval:'peer',athlete_id:'athlete-1',proposer:'peer',payload:{lift:'bench',value:145}}];
   const copy = (data) => structuredClone(data);
@@ -31,7 +36,10 @@
   };
   document.addEventListener('DOMContentLoaded',()=>{
     const banner=document.createElement('div');
-    banner.className='config-banner'; banner.textContent=`Local test fixture: ${fixture}. Changes stay in this tab.`;
+    banner.className='config-banner fixture-banner'; banner.textContent=`Local test fixture: ${fixture}. Changes stay in this tab.`;
+    const style = document.createElement('style');
+    style.textContent = '.tv-mode .fixture-banner { position: fixed; bottom: 6px; left: 28px; z-index: 10; margin: 0; padding: 2px 6px; font: 12px/1.5 system-ui; }';
+    document.head.appendChild(style);
     document.querySelector('.container').prepend(banner);
   });
 })();

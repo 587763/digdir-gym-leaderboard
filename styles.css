@@ -205,12 +205,14 @@ body.is-admin   .admin-only  { display: inline-flex; }
 .podium-stand {
   width: 100%; border: 2px solid var(--ink); border-bottom: none;
   border-radius: 10px 10px 0 0; display: flex; align-items: flex-start;
-  justify-content: center; padding-top: 8px; color: #473e32;
-  font-family: 'Permanent Marker', cursive; font-size: 1.8rem;
+  justify-content: center; padding: .25rem; color: #473e32;
+  font-family: 'Permanent Marker', cursive; font-size: 1.8rem; line-height: 1;
+  min-height: calc(1em + .5rem + 2px);
 }
-.podium-spot.first  .podium-stand { height: 86px; background: var(--gold);   border-color: #d99e16; }
-.podium-spot.second .podium-stand { height: 62px;  background: var(--silver); border-color: #94a3b8; }
-.podium-spot.third  .podium-stand { height: 44px;  background: var(--bronze); border-color: #b06a44; }
+/* Steps and lettering share a scale, including Chrome zoom and TV root sizing. */
+.podium-spot.first  .podium-stand { height: 5.375rem; background: var(--gold);   border-color: #d99e16; }
+.podium-spot.second .podium-stand { height: 3.875rem; background: var(--silver); border-color: #94a3b8; }
+.podium-spot.third  .podium-stand { height: 2.75rem; background: var(--bronze); border-color: #b06a44; }
 .podium-spot.first  { order: 2; }
 .podium-spot.second { order: 1; }
 .podium-spot.third  { order: 3; }
@@ -284,7 +286,7 @@ body.is-admin   .admin-only  { display: inline-flex; }
 .fun-lifts-container { display: flex; flex-direction: column; gap: 24px; }
 .achievement-section {
   background: var(--panel); border: 2px solid var(--ink); border-radius: var(--radius);
-  padding: 22px; box-shadow: var(--shadow);
+  padding: 22px; box-shadow: var(--shadow); min-width: 0;
 }
 .achievement-section h2 { font-family: 'Permanent Marker', cursive; font-size: 1.7rem; margin-bottom: 6px; }
 .achievement-description { color: var(--ink-soft); font-size: 1.2rem; margin-bottom: 18px; }
@@ -292,10 +294,10 @@ body.is-admin   .admin-only  { display: inline-flex; }
 .achievement-badge {
   display: flex; flex-direction: column; align-items: center; gap: 4px;
   background: #fff; border: 2px solid var(--marker-amber); border-radius: 12px;
-  padding: 12px 16px; min-width: 120px;
+  padding: 12px 16px; min-width: 120px; max-width: 100%;
 }
 .badge-avatar { line-height: 0; }
-.badge-name { font-size: 1.25rem; font-weight: 700; }
+.badge-name { font-size: 1.25rem; font-weight: 700; max-width: 100%; overflow-wrap: anywhere; text-align: center; }
 .badge-subtitle { font-family: 'Indie Flower', cursive; font-size: 1rem; color: var(--marker-amber); }
 .empty-achievement { color: var(--ink-soft); font-size: 1.2rem; }
 .achievement-count { margin-top: 16px; font-family: 'Indie Flower', cursive; color: var(--ink-soft); }
@@ -385,8 +387,9 @@ body:not(.signed-in) .controls { display: none; }
 .leaderboard-section[data-lift="deadlift"] h2 { color: #62518c; }
 #lifts-tab .leaderboards, #other-tab .leaderboards { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 #total-tab .leaderboard-section, #cardio-tab .leaderboard-section { width: 100%; max-width: 820px; margin: 0 auto; }
-.leaderboard-table th:first-child { width: 52px; }
-.leaderboard-table th:last-child { width: 90px; }
+.leaderboard-table th:first-child { width: 3.5rem; }
+.leaderboard-table th:last-child { width: 6rem; }
+#totalTable th:last-child { width: 7rem; }
 .leaderboard-table td, .leaderboard-table th { padding-left: 6px; padding-right: 6px; }
 .leaderboard-table td:nth-child(2) { overflow-wrap: anywhere; }
 .leaderboard-table tbody tr:hover { background: #2563eb06; }
@@ -453,6 +456,13 @@ html.tv-mode, .tv-mode body { height: 100vh; overflow: hidden; }
 .tv-mode .hint,
 .tv-mode .eyebrow,
 .tv-mode .board-meta { display: none; }
+/* Keep connection trouble visible on an unattended display; use the paging reserve. */
+.tv-mode .board-meta.connection-warning {
+  display: flex; position: fixed; right: 28px; bottom: 6px; z-index: 10;
+  max-width: calc(100% - 56px); padding: 3px 8px; border: 0;
+  border-radius: 6px; background: var(--whiteboard); font-size: .65rem;
+}
+.tv-mode .board-meta #athleteCount { display: none; }
 
 /* Compact header so the board claims the height. */
 .tv-mode header { margin-bottom: 12px; }
@@ -475,7 +485,6 @@ html.tv-mode, .tv-mode body { height: 100vh; overflow: hidden; }
 .tv-mode .tab-content.active { flex: 1; min-height: 0; overflow: hidden; display: flex; flex-direction: column; position: relative; }
 .tv-mode .leaderboards { align-content: start; }
 .tv-mode .leaderboard-section { transform: none; }
-.tv-mode .leaderboard-table th:last-child { width: 110px; }
 .tv-mode .achievement-section th:first-child { width: 65%; }
 .tv-mode .achievement-section th:last-child { width: 35%; }
 .tv-mode .achievement-section td:first-child { overflow-wrap: anywhere; }
@@ -509,9 +518,10 @@ html.tv-mode, .tv-mode body { height: 100vh; overflow: hidden; }
 .tv-mode .podium-avatars { height: 60px; }
 .tv-mode .podium-athlete { margin-bottom: 2px; }
 .tv-mode .podium-medal { margin-top: -4px; }
-.tv-mode .podium-spot.first  .podium-stand { height: 80px; }
-.tv-mode .podium-spot.second .podium-stand { height: 58px; }
-.tv-mode .podium-spot.third  .podium-stand { height: 42px; }
+.tv-mode .podium-stand { font-size: 1.4rem; }
+.tv-mode .podium-spot.first  .podium-stand { height: 3.6rem; }
+.tv-mode .podium-spot.second .podium-stand { height: 2.8rem; }
+.tv-mode .podium-spot.third  .podium-stand { height: 2rem; }
 
 /* Page dots: shown when a tab's roster spans more than one screen. The rotation
    cycles a page per tick before advancing to the next tab; the active dot tracks

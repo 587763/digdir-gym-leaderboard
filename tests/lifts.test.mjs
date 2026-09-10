@@ -31,6 +31,15 @@ test('total adds numeric strings and excludes athletes without any records', () 
   assert.equal(Lifts.value(athlete('A',{bench:'100',squat:'120',deadlift:'150'}), 'total'), 370);
   assert.equal(Lifts.ranked([athlete('Empty')], 'total').length, 0);
 });
+test('equal decimal totals share a rank despite different floating-point sums', () => {
+  const rows = Lifts.ranked([
+    athlete('A', {squat:100.1, bench:100.2, deadlift:100.3}),
+    athlete('B', {squat:'100.2', bench:'100.3', deadlift:'100.1'}),
+    athlete('C', {squat:100, bench:100, deadlift:100}),
+  ], 'total');
+  assert.deepEqual(Array.from(rows, (r) => [r.athlete.name, r.value, r.rank]),
+    [['A',300.6,1],['B',300.6,1],['C',300,3]]);
+});
 test('history escapes unknown labels and ignores invalid points', () => {
   const html = HistoryView.render([
     {payload:{lift:'<img src=x onerror=alert(1)>',value:10},decided_at:'2026-01-01'},

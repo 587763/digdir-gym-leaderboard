@@ -6,6 +6,8 @@
 const LIFTS = window.Lifts.main;
 const LIFT_META = window.Lifts.meta;
 const TV_PAGE_PAD = 48;
+const TV_MIN_DWELL_MS = 5000;
+const REFRESH_CHECK_MS = 60000;
 
 // Extra-lift tabs: a lift's `group` (js/lifts.js; default 'other') routes its board
 // to one of these tabs, each backed by a DOM container. Both draw from athletes.lifts.
@@ -76,6 +78,7 @@ class LeaderboardApp {
         this.proposals = [];
         this.closeAll();
         this.reflectAuth();
+        this.render(); // Clear private pending markers even if the public data stays unchanged.
       }
       this.refreshAll();
     });
@@ -85,7 +88,19 @@ class LeaderboardApp {
       if (this.realtimeConnected) this.refreshAll();
     });
     await this.refreshAll();
+    this.scheduleRefreshCheck();
     document.fonts?.ready.then(() => { if (this.tvMode) this.fitTvPaging(); });
+  }
+
+  // A wall display may never regain focus. Periodically reconcile missed events
+  // and failed reads even if the realtime connection claims to be healthy.
+  scheduleRefreshCheck() {
+    clearTimeout(this.refreshCheckTimer);
+    if (!window.Store.configured || document.hidden) return;
+    this.refreshCheckTimer = setTimeout(async () => {
+      if (!document.hidden) await this.refreshAll();
+      this.scheduleRefreshCheck();
+    }, REFRESH_CHECK_MS);
   }
 
   // Serialize refreshes and coalesce bursts, while discarding responses for old identities.
@@ -97,6 +112,7 @@ class LeaderboardApp {
       while (this.refreshRequested) {
         this.refreshRequested = false;
         const version = this.identityVersion;
+        const before = this.boardSnapshot();
         try {
           const session = await window.Store.getSession();
           const user = session?.user ?? null;
@@ -113,12 +129,21 @@ class LeaderboardApp {
           this.loadError = error;
         }
         this.loading = false;
-        this.reflectAuth();
-        this.render();
-        this.refreshOpenModals();
+        // Periodic checks with unchanged data must not replace focused controls
+        // or redraw a history dialog the visitor is reading.
+        if (before !== this.boardSnapshot()) {
+          this.reflectAuth();
+          this.render();
+          this.refreshOpenModals();
+        } else this.updateBoardStatus();
       }
     })().finally(() => { this.refreshPromise = null; });
     return this.refreshPromise;
+  }
+
+  boardSnapshot() {
+    return JSON.stringify([this.user, this.profile, this.athletes, this.profiles,
+      this.proposals, this.loading, !!this.loadError]);
   }
 
   updateBoardStatus() {
@@ -132,6 +157,8 @@ class LeaderboardApp {
       : !window.Store.configured ? 'Not connected'
       : this.realtimeConnected ? 'Live from the gym' : 'Board loaded · reconnecting…';
     document.getElementById('retryBtn').hidden = !failed;
+    document.querySelector('.board-meta').classList.toggle('connection-warning',
+      !this.loading && (failed || !this.realtimeConnected));
   }
 
   // --- auth UI --------------------------------------------------------------
@@ -263,8 +290,10 @@ class LeaderboardApp {
     document.addEventListener('visibilitychange', () => {
       if (this.tvMode) (document.hidden ? this.stopRotation() : this.startRotation());
       if (!document.hidden) this.refreshAll();
+      this.scheduleRefreshCheck();
     });
     window.addEventListener('focus', () => this.refreshAll());
+    window.addEventListener('online', () => this.refreshAll());
 
     // Re-fit TV pagination when the screen size changes (e.g. the TV reconnects).
     let resizeT;
@@ -285,6 +314,7 @@ class LeaderboardApp {
     document.body.classList.add('modal-open');
     [...document.querySelector('.container').children].forEach((el) => { el.inert = el !== modal; });
     (modal.querySelector('input:not([disabled]), select, button') || modal).focus();
+    if (this.tvMode) this.stopRotation();
   }
   closeModal(id) {
     document.getElementById(id).style.display = 'none';
@@ -292,6 +322,7 @@ class LeaderboardApp {
       document.body.classList.remove('modal-open');
       [...document.querySelector('.container').children].forEach((el) => { el.inert = false; });
       this.restoreModalFocus();
+      this.restartRotationTimer();
     }
   }
   closeAll(restoreFocus = true) {
@@ -300,6 +331,7 @@ class LeaderboardApp {
     document.body.classList.remove('modal-open');
     [...document.querySelector('.container').children].forEach((el) => { el.inert = false; });
     if (restoreFocus && wasOpen) this.restoreModalFocus();
+    if (restoreFocus && wasOpen) this.restartRotationTimer();
   }
   restoreModalFocus() {
     const trigger = this.modalTrigger?.isConnected ? this.modalTrigger
@@ -563,7 +595,8 @@ class LeaderboardApp {
 
   async adminLink(userId, athleteId) {
     try {
-      await window.Store.adminUpdateProfile(userId, { athlete_id: athleteId || null, status: athleteId ? 'active' : 'pending' });
+      const status = this.profileByUser(userId)?.status === 'blocked' ? 'blocked' : athleteId ? 'active' : 'pending';
+      await window.Store.adminUpdateProfile(userId, { athlete_id: athleteId || null, status });
       await this.refreshAll();
       this.showToast('Updated', 'success');
     } catch (e) { this.showToast(this.errText(e), 'error'); }
@@ -733,7 +766,7 @@ class LeaderboardApp {
   // setInterval won't do — each tick schedules the next using the current dwell.
   scheduleTick() {
     if (this.rotateTimer) clearTimeout(this.rotateTimer);
-    if (!this.tvMode || document.hidden) return;
+    if (!this.tvMode || document.hidden || this.anyModalOpen()) return;
     this.restartProgress();
     this.rotateTimer = setTimeout(() => { this.advanceTab(); this.scheduleTick(); }, this.currentDwellMs());
   }
@@ -744,12 +777,12 @@ class LeaderboardApp {
   restartRotationTimer() { if (this.tvMode) this.startRotation(); } // e.g. after a manual tab click
 
   // rotateMs is the budget *per tab* (the configured cadence), so a multi-page tab
-  // still hands off on time. Pages split that budget; page 1 (podium + top ranks)
-  // gets double the dwell of the rest, which viewers mostly scan for their own name.
+  // splits that budget; page 1 gets double the dwell of the rest. A large roster
+  // extends the tab budget instead of flashing unreadable sub-second pages.
   currentDwellMs() {
     const pages = Math.max(1, this.tvPages);
     const weight = this.tvPage === 0 ? 2 : 1;
-    return Math.round((this.rotateMs * weight) / (pages + 1));
+    return Math.max(TV_MIN_DWELL_MS * (pages === 1 ? 1 : weight), Math.round((this.rotateMs * weight) / (pages + 1)));
   }
 
   advanceTab() {
@@ -808,7 +841,7 @@ class LeaderboardApp {
     badge.hidden = n === 0;
   }
 
-  renderLeaderboard(liftType) {
+  renderLeaderboard(liftType, allowPodium = true) {
     const section = document.querySelector(`#${liftType}Table`).closest('.leaderboard-section');
     const tbody = section.querySelector('tbody');
     const ranked = window.Lifts.ranked(this.athletes, liftType);
@@ -821,7 +854,7 @@ class LeaderboardApp {
     }
     // Tied medal positions share a rank. Keep the full podium group together.
     const winners = ranked.filter((row) => row.rank <= 3);
-    const showPodium = winners.length <= 6 && (!this.tvMode || window.innerHeight >= 760);
+    const showPodium = allowPodium && winners.length <= 6 && (!this.tvMode || window.innerHeight >= 760);
     if (showPodium) this.renderPodium(section, winners, liftType);
     const tableAthletes = showPodium ? ranked.filter((row) => row.rank > 3) : ranked;
     section.querySelector('table').hidden = tableAthletes.length === 0;
@@ -879,6 +912,20 @@ class LeaderboardApp {
     const previousPages = this.tvPages;
     const previousPage = this.tvPage;
     const bottom = frame.getBoundingClientRect().bottom - TV_PAGE_PAD;
+    // Reconsider podiums after fonts, available height or the active tab change.
+    // A fixed viewport cutoff alone cannot account for long names or large text.
+    frame.querySelectorAll('[data-lift]').forEach((section) => {
+      this.renderLeaderboard(section.dataset.lift);
+      const podium = section.querySelector('.podium-container');
+      if (!podium) return;
+      const rows = [...section.querySelectorAll('tbody tr')];
+      const rowHeight = Math.max(0, ...rows.map((row) => row.getBoundingClientRect().height));
+      const needed = rowHeight * Math.min(2, rows.length);
+      const table = section.querySelector('table');
+      const start = table.hidden ? podium.getBoundingClientRect().bottom
+        : section.querySelector('tbody').getBoundingClientRect().top;
+      if (start + needed > bottom) this.renderLeaderboard(section.dataset.lift, false);
+    });
     this.tvBoards = [];
     let pages = 1;
     frame.querySelectorAll('.leaderboard-section').forEach((section) => {
