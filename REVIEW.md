@@ -73,9 +73,9 @@ Not exercised: production sign-in and writes, applying 0006 to the live database
 physical office TV, and Safari/Firefox (checks ran in Chromium).
 
 ### Remaining follow-ups
-0. **Backups stopped on 30 August**: GitHub disabled the scheduled backup workflow after 60
-   days without commits, and it stays disabled until someone enables it again (Actions tab).
-   Consider a keepalive so a quiet repository can't silently stop the backups again.
+0. **Backups stopped on 30 August** (resolved 30 September): GitHub disabled the scheduled
+   backup workflow after 60 days without commits. It was re-enabled, a fresh backup was
+   taken, and each run now re-enables its own schedule so a quiet repository can't pause it.
 1. **History retention** (unchanged from below): deleting an athlete still deletes their
    verified history. Decide the retention policy, then consider archiving athletes.
 2. **Make the browser job required** once it has proven stable in CI.

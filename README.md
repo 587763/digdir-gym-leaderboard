@@ -107,8 +107,9 @@ idle free projects can be paused or deleted). A scheduled GitHub Actions workflo
 keeps each dump as a **workflow artifact for 90 days**; dumps are never committed to this
 public repo.
 
-GitHub pauses scheduled workflows in repositories without commits for 60 days; if the
-backups stop, enable the workflow again from the Actions tab. It authenticates via the
+GitHub pauses scheduled workflows in repositories without commits for 60 days (the backups
+stopped this way on 30 August 2026). Each backup run now re-enables its own schedule; if it
+ever shows as disabled in the Actions tab, enable it there. It authenticates via the
 `SUPABASE_DB_URL` repository secret (the project's full Postgres
 connection string — full DB access, so it lives only in Actions secrets). If that secret
 is ever missing, the workflow fails fast with a message saying so.

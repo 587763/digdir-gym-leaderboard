@@ -68,7 +68,8 @@ Live: https://587763.github.io/digdir-gym-leaderboard/ · Origin: `587763/digdir
   PGlite Postgres/RLS tests, isolated browser fixtures (`tests/browser-store.js`).
 - `.github/workflows/deploy.yml`: tests PRs and main; deploys main only after `npm test` passes.
   A separate `browser` job runs the layout checks and does not gate deploys yet.
-- `.github/workflows/backup.yml`: daily table dumps, 90-day workflow artifacts.
+- `.github/workflows/backup.yml`: daily table dumps, 90-day workflow artifacts; each run
+  re-enables the workflow so GitHub's 60-day inactivity rule cannot pause it.
 - `.claude/launch.json`: local preview server named `leaderboard`.
 
 ## Run and verify
@@ -171,7 +172,11 @@ CDN upgrade: bump the pinned supabase-js version and recompute SHA-384 on the ex
 file. Never use the floating `@2` URL (CDN minification can invalidate SRI).
 
 ## Backups and icons
-Daily backup uses `SUPABASE_DB_URL` Actions secret and fails clearly if missing. Dumps cover
+Daily backup uses `SUPABASE_DB_URL` Actions secret and fails clearly if missing. GitHub pauses
+scheduled workflows after 60 days without commits (it did on 2026-08-30); the keepalive step
+prevents that, but a paused workflow must be re-enabled by hand (Actions tab or
+`env -u GH_TOKEN gh workflow enable backup.yml`). Check `gh run list --workflow backup.yml`
+before risky database work. Dumps cover
 public athletes/profiles/proposals only; they are not complete Supabase/Auth backups. Restoring
 requires compatible functions, roles and matching auth.users IDs. Never commit dumps.
 
