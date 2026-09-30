@@ -13,7 +13,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Permanent+Marker&family=Caveat:wght@400;600;700&family=Indie+Flower&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="styles.css?v=3.1.0">
+  <link rel="stylesheet" href="styles.css?v=3.2.0">
 </head>
 <body>
   <svg class="svg-defs" width="0" height="0" aria-hidden="true">
@@ -52,6 +52,9 @@
       <button type="button" id="adminBtn" class="btn btn-secondary admin-only" data-action="open-members">🛡️ Admin</button>
       <button type="button" id="manageAthletesBtn" class="btn btn-secondary admin-only" data-action="open-athletes">👥 Athletes</button>
     </div>
+
+    <!-- A returning member whose athlete was archived can bring it back -->
+    <div id="welcomeBack" class="notice-banner" role="status" hidden></div>
 
     <div class="board-meta">
       <div class="connection-status"><span id="boardStatus" role="status" data-state="idle">Opening the record book…</span><button type="button" id="retryBtn" class="btn btn-ghost" data-action="retry" hidden>Try again</button></div>
@@ -221,15 +224,15 @@
     src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.107.0/dist/umd/supabase.js"
     integrity="sha384-CQbEv3UOeYwlaBLdPF5KqEagCP39Q1KpvJC6Gwa3UGjZAwMvpA+0TFxSSnrgb4MX"
     crossorigin="anonymous"></script>
-  <script src="js/config.js?v=3.1.0"></script>
-  <script src="js/ui.js?v=3.1.0"></script>
-  <script src="js/achievements.js?v=3.1.0"></script>
-  <script src="js/lifts.js?v=3.1.0"></script>
-  <script src="js/avatar.js?v=3.1.0"></script>
-  <script src="js/store.js?v=3.1.0"></script>
-  <script src="js/history.js?v=3.1.0"></script>
-  <script src="js/board.js?v=3.1.0"></script>
-  <script src="js/tv.js?v=3.1.0"></script>
-  <script src="js/app.js?v=3.1.0"></script>
+  <script src="js/config.js?v=3.2.0"></script>
+  <script src="js/ui.js?v=3.2.0"></script>
+  <script src="js/achievements.js?v=3.2.0"></script>
+  <script src="js/lifts.js?v=3.2.0"></script>
+  <script src="js/avatar.js?v=3.2.0"></script>
+  <script src="js/store.js?v=3.2.0"></script>
+  <script src="js/history.js?v=3.2.0"></script>
+  <script src="js/board.js?v=3.2.0"></script>
+  <script src="js/tv.js?v=3.2.0"></script>
+  <script src="js/app.js?v=3.2.0"></script>
 </body>
 </html>

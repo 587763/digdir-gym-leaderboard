@@ -12,10 +12,16 @@
     bench: 99999 - i / 10, squat: 99999 - i / 10, deadlift: 99999 - i / 10,
     lifts: {deadhang:99999 - i, pullups:99999 - i, pushups:99999 - i, run1k:99999 - i},
   }));
+  // An archived athlete: off the boards, records and verified history kept.
+  if (fixture !== 'empty') athletes.push({id:'athlete-archived',name:'Rita Retired',bench:95,squat:120,deadlift:140,
+    lifts:{deadhang:60},achievements:[],archived_at:'2026-08-01T10:00:00Z',updated_at:'2026-08-01T10:00:00Z'});
   const day = 86400000;
   const ago = (days) => new Date(Date.now() - days * day).toISOString();
   const profile = {user_id:'admin',github_login:'preview-admin',is_admin:true,status:'active',athlete_id:'athlete-0'};
-  let profiles = [profile,
+  // ?fixture=returning signs in as a member whose athlete was archived while they were away.
+  const returning = {user_id:'rita',github_login:'rita-returns',is_admin:false,status:'active',athlete_id:'athlete-archived'};
+  const me = fixture === 'returning' ? returning : profile;
+  let profiles = [profile, returning,
     {user_id:'peer',github_login:'daniel-lifts',is_admin:false,status:'active',athlete_id:'athlete-1'},
     {user_id:'newbie',github_login:'new-member',is_admin:false,status:'pending',athlete_id:null},
     {user_id:'banned',github_login:'blocked-member',is_admin:false,status:'blocked',athlete_id:null},
@@ -28,13 +34,14 @@
     {id:'pr-1',athlete_id:'athlete-1',payload:{lift:'bench',value:100},decided_at:'2026-06-01T10:00:00Z'},
     {id:'pr-2',athlete_id:'athlete-1',payload:{lift:'bench',value:110,previous_value:100},decided_at:'2026-06-03T10:00:00Z'},
     {id:'pr-3',athlete_id:'athlete-1',payload:{lift:'bench',value:120,previous_value:110},decided_at:'2026-08-01T10:00:00Z'},
+    {id:'pr-4',athlete_id:'athlete-archived',payload:{lift:'squat',value:120,previous_value:110},decided_at:'2026-07-15T10:00:00Z'},
   ];
   const copy = (data) => structuredClone(data);
-  const signedIn = fixture === 'admin';
+  const signedIn = ['admin', 'returning'].includes(fixture);
   window.Store = {
-    configured:true, userLabel:()=>profile.github_login,
-    getSession:async()=>signedIn?{user:{id:'admin'}}:null,
-    myProfile:async()=>copy(profile), listProfiles:async()=>copy(profiles),
+    configured:true, userLabel:()=>me.github_login,
+    getSession:async()=>signedIn?{user:{id:me.user_id}}:null,
+    myProfile:async()=>copy(profiles.find((p)=>p.user_id===me.user_id)), listProfiles:async()=>copy(profiles),
     listAthletes:async()=>{if(fixture==='error') throw new Error('Fixture connection failure'); return copy(athletes);},
     listPendingProposals:async()=>copy(proposals),
     listRecentPrs:async()=>copy(history).reverse(),
@@ -44,6 +51,8 @@
     propose:async(kind,id,payload)=>{proposals.push({id:crypto.randomUUID(),kind,athlete_id:id,payload,proposer:'admin',approval:['pr','achievement'].includes(kind)?'peer':'admin',status:'pending',created_at:new Date().toISOString()});},
     decide:async(id)=>{proposals=proposals.filter((p)=>p.id!==id);},
     withdraw:async(id)=>{proposals=proposals.filter((p)=>p.id!==id);},
+    restoreMyAthlete:async()=>{const a=athletes.find((x)=>x.id===me.athlete_id); if(a) a.archived_at=null;},
+    adminSetArchived:async(id,archived)=>{athletes.find((a)=>a.id===id).archived_at=archived?new Date().toISOString():null;},
     adminUpdateProfile:async(id,patch)=>Object.assign(profiles.find((p)=>p.user_id===id),patch),
     adminCreateAthlete:async(data)=>athletes.push({...data,id:crypto.randomUUID()}),
     adminUpdateAthlete:async(id,patch)=>Object.assign(athletes.find((a)=>a.id===id),patch),
