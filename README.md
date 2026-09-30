@@ -2,9 +2,9 @@
 
 A digital version of our office gym whiteboard — squat / bench / deadlift personal
 records, a combined total, podiums, "other lifts" (a timed dead hang, push-up & pull-up
-counts), a Cardio tab (e.g. a fastest 1 km), per-athlete progression charts, and a Hall
-of Fame for fun achievements. Hand-drawn whiteboard look; the board updates live across
-everyone's screens.
+counts), a Cardio tab (e.g. a fastest 1 km), a feed of the latest verified PRs,
+per-athlete progression charts, and a Hall of Fame for fun achievements. Hand-drawn
+whiteboard look; the board updates live across everyone's screens.
 
 **Live:** https://587763.github.io/digdir-gym-leaderboard/
 
@@ -12,16 +12,20 @@ everyone's screens.
 - Changes appear in real time (nice on a wall-mounted display).
 - **Tap any athlete's name** to see their progression — a sparkline of every
   peer-verified PR over time. Direct admin edits are not part of that history.
+- **Latest** lists the newest verified PRs with how much they improved; 🔥 marks a
+  record set in the last week, and a PR verified while you watch gets a little cheer.
+- Tab links can be shared: add `#total`, `#cardio`, `#latest` and so on to the URL.
 - **Putting it on a TV?** Open the board with `?tv` (e.g. the live URL + `?tv`), or hit
   the **📺 TV mode** button. You get a full-screen landscape layout that auto-cycles
   through the tabs hands-free — and pauses while the browser tab is off-screen, so it
   plays nicely with a screen that rotates between several pages. A big roster is paged
   through automatically. Add `&rotate=20` to change the target seconds per tab (default
-  15). Large rosters extend that time so every page gets at least five seconds to read;
+  15), and `&tabs=lifts,total,latest` to show only some tabs. Large rosters extend that time so every page gets at least five seconds to read;
   the first page gets double the time. Podium steps scale with their numbers when Chrome
   zoom changes, and crowded screens use complete ranked tables when podiums leave too
   little room. Connection trouble stays visible, and the board checks for missed updates
-  every minute while the page is visible.
+  every minute while the page is visible. If the screen cycles between several pages, the
+  countdown resumes where it left off, so every tab still gets its turn.
 
 ## Who can change what
 
@@ -33,7 +37,11 @@ witnesses it):
 - **Your PRs & achievements** need a **peer** to verify them — any other linked member
   (you can't verify your own). Until verified, the change is pending.
 - **Name changes & new athletes** need an **admin**.
-- **Admins** manage members and can edit the board directly.
+- **Admins** manage members and can edit the board directly. The database always keeps
+  at least one working admin, and the members list won't let admins demote or block
+  themselves.
+- **Changed your mind?** Withdraw your own pending request from My PRs, the claim dialog,
+  or the review list.
 - Blocked accounts cannot submit or approve changes. Requests are validated, repeated
   submissions are deduplicated, and stale PR requests cannot overwrite newer records.
   Admin forms also detect concurrent edits instead of overwriting someone else’s changes.
@@ -62,9 +70,10 @@ architecture, the repo map, how to run/verify locally, the deploy flow, and gotc
 Quick start:
 
 ```bash
-npm run dev      # Node 22+, http://localhost:3000; no install needed
-npm ci           # install development-only test tools
-npm test         # frontend + local Postgres/RLS regression tests
+npm run dev           # Node 22+, http://localhost:3000; no install needed
+npm ci                # install development-only test tools
+npm test              # frontend + local Postgres/RLS regression tests
+npm run test:browser  # layout checks in your local Chrome (desktop, phone, TV)
 ```
 
 The local server serves only the website files, with caching disabled. It never exposes
@@ -75,17 +84,20 @@ workspace files such as `.env`. To try forms without touching the real board, op
 stay in memory, and fixtures are excluded from the deployed site.
 
 The boards use shared ranks for ties (1, 1, 3). A zero value means no entry. Enter weights
-to one decimal, repetitions as whole numbers, and times as `m:ss` or whole seconds.
+to one decimal, repetitions as whole numbers, and times as `m:ss` (or `m.ss` on a phone
+keypad) or whole seconds; the form shows how a time will be read before you submit.
 Keyboard users can move between tabs with arrow keys and close dialogs with Escape.
 Equal decimal totals share the same rank. TV rotation pauses while a dialog is open.
 
-The [September 2026 repository review](REVIEW.md) records the display fixes, verification,
-and recommended database and maintenance follow-ups.
+The [repository review](REVIEW.md) records what the September 2026 reviews changed, how it
+was verified, and the remaining follow-ups.
 
 For an existing database, apply
-[`0005_governance_hardening.sql`](supabase/migrations/0005_governance_hardening.sql)
-in the Supabase SQL Editor before deploying this version. It preserves existing data.
-For a fresh installation, use `supabase/schema.sql` instead; that file resets the tables.
+[`0006_member_safeguards.sql`](supabase/migrations/0006_member_safeguards.sql)
+(after 0005) in the Supabase SQL Editor before deploying this version (the live database
+has it since 30 September 2026). It preserves existing
+data; without it, everything works except withdrawing requests. For a fresh installation,
+use `supabase/schema.sql` instead; that file resets the tables.
 
 ## Backups
 
@@ -95,7 +107,9 @@ idle free projects can be paused or deleted). A scheduled GitHub Actions workflo
 keeps each dump as a **workflow artifact for 90 days**; dumps are never committed to this
 public repo.
 
-It authenticates via the `SUPABASE_DB_URL` repository secret (the project's full Postgres
+GitHub pauses scheduled workflows in repositories without commits for 60 days; if the
+backups stop, enable the workflow again from the Actions tab. It authenticates via the
+`SUPABASE_DB_URL` repository secret (the project's full Postgres
 connection string — full DB access, so it lives only in Actions secrets). If that secret
 is ever missing, the workflow fails fast with a message saying so.
 
