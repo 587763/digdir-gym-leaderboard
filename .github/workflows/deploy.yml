@@ -34,6 +34,19 @@ jobs:
       - run: npm ci
       - run: npm test
 
+  # Layout checks in the runner's Chrome (no extra dependencies). Reported on every
+  # PR; not yet required for deploys while it proves stable in CI.
+  browser:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - run: npm run test:browser
+
   deploy:
     if: github.event_name != 'pull_request'
     needs: test
