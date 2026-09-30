@@ -1,6 +1,6 @@
 {
   "name": "digdir-gym-leaderboard",
-  "version": "3.1.0",
+  "version": "3.2.0",
   "description": "Static gym leaderboard (squat/bench/deadlift PRs) backed by Supabase. No build step.",
   "private": true,
   "scripts": {

@@ -76,11 +76,12 @@ physical office TV, and Safari/Firefox (checks ran in Chromium).
 0. **Backups stopped on 30 August** (resolved 30 September): GitHub disabled the scheduled
    backup workflow after 60 days without commits. It was re-enabled, a fresh backup was
    taken, and each run now re-enables its own schedule so a quiet repository can't pause it.
-1. **History retention** (unchanged from below): deleting an athlete still deletes their
-   verified history. Decide the retention policy, then consider archiving athletes.
-2. **Make the browser job required** once it has proven stable in CI.
-3. **Agent permissions**: `.claude/settings.json` still allows `mcp__Claude_Preview__*` tools,
-   which were renamed (`mcp__Claude_Browser__*`). Update if you want those pre-approved.
+1. **History retention** (resolved 30 September, migration 0007): athletes are archived
+   instead of deleted, keeping history indefinitely; returning members restore their own
+   athlete, and permanent deletion remains for erasure requests.
+2. **Browser job gates deploys** (resolved 30 September) after passing every CI run.
+3. **Agent permissions** (resolved 30 September): `.claude/settings.json` now names the
+   current `mcp__Claude_Browser__*` tools.
 4. **Database cleanup** after confirming nothing external uses them: the unused legacy
    `athletes.updated_by` column and the unused `is_active_linked()` function.
 

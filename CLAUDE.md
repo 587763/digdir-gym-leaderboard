@@ -22,7 +22,7 @@ Live: https://587763.github.io/digdir-gym-leaderboard/ · Origin: `587763/digdir
 
 ## Files
 - `index.html`: tabs, native `<dialog>` markup, empty board containers (`data-board-group`),
-  a Content-Security-Policy meta tag, the CDN pin and local asset version (`?v=3.1.0`). Bump
+  a Content-Security-Policy meta tag, the CDN pin and local asset version (`?v=3.2.0`). Bump
   every `?v=` together when deploying coordinated JS/CSS changes. No inline styles or scripts:
   the CSP forbids them (the fixture store uses a constructed stylesheet).
 - `styles.css`: one rule set per component in page order, then responsive rules, then TV mode.
@@ -56,7 +56,8 @@ Live: https://587763.github.io/digdir-gym-leaderboard/ · Origin: `587763/digdir
 - `supabase/schema.sql`: destructive fresh-install schema + seed. Never run against production.
 - `supabase/migrations/`: hand-applied live upgrades. 0001 superseded; 0002 governance;
   0003 extra lifts; 0004 public history; 0005 validation and decision hardening; 0006 member
-  safeguards (withdraw, last admin, unit validation, reviewer FK, recent-PR index).
+  safeguards (withdraw, last admin, unit validation, reviewer FK, recent-PR index); 0007
+  archived athletes (`archived_at`, `restore_my_athlete()`, archive-aware propose/decide).
 - `scripts/dev-server.mjs`: Node static allowlist server, no caching, localhost only. Does not
   serve `.env`, `.git`, SQL or arbitrary workspace files. `PORT` overrides 3000.
 - `scripts/browser-check.mjs`: zero-dependency layout checks in local Chrome over the DevTools
@@ -66,8 +67,8 @@ Live: https://587763.github.io/digdir-gym-leaderboard/ · Origin: `587763/digdir
   re-render, and a quiet console. Assert containment, not pixels (fonts differ by machine).
 - `tests/`: Node tests, LinkeDOM UI tests (with `<dialog>` and innerHTML shims in helpers),
   PGlite Postgres/RLS tests, isolated browser fixtures (`tests/browser-store.js`).
-- `.github/workflows/deploy.yml`: tests PRs and main; deploys main only after `npm test` passes.
-  A separate `browser` job runs the layout checks and does not gate deploys yet.
+- `.github/workflows/deploy.yml`: tests PRs and main; deploys main only after both `npm test`
+  (the `test` job) and the layout checks (the `browser` job) pass.
 - `.github/workflows/backup.yml`: daily table dumps, 90-day workflow artifacts; each run
   re-enables the workflow so GitHub's 60-day inactivity rule cannot pause it.
 - `.claude/launch.json`: local preview server named `leaderboard`.
@@ -84,16 +85,18 @@ keyboard focus/Escape, no console errors. Missing config/CDN leaves usable tabs 
 explanation instead of crashing. Refresh failures preserve the last board and expose Retry.
 
 Local-only fixtures: `/?fixture=admin` (signed-in admin with a pending PR, a pending member
-claim and a blocked member), `empty`, `error`, `large` (65 athletes), or `layout` (long
-medalist names and maximum scores). TV fixture labels do not consume board height. The dev
+claim, a blocked member and an archived athlete), `returning` (a member whose athlete was
+archived; shows the welcome-back banner), `empty`, `error`, `large` (65 athletes), or `layout`
+(long medalist names and maximum scores). TV fixture labels do not consume board height. The dev
 server replaces Store with `tests/browser-store.js` and removes the Supabase CDN script.
 Writes stay in memory. Use `?fixture=large&tv&rotate=120` for TV layout inspection.
 Fixture controls/data are never included in the deployed artifact.
 
 ## Data and governance
 - `athletes`: name; fixed bench/squat/deadlift kg columns; `lifts` JSONB extra-exercise map;
-  achievements text array; reserved avatar JSONB; timestamps. (Production also carries an
-  unused legacy `updated_by` column; the app selects explicit columns.)
+  achievements text array; reserved avatar JSONB; `archived_at` (null = on the boards);
+  timestamps. (Production also carries an unused legacy `updated_by` column; the app selects
+  explicit columns.)
 - `profiles`: GitHub identity, is_admin, status (pending/active/blocked), unique athlete link.
 - `proposals`: claim/new_athlete/rename/pr/achievement, admin/peer approval, payload, proposer,
   pending/approved/rejected status and decision timestamps. Approved PRs are public history
@@ -110,8 +113,18 @@ Fixture controls/data are never included in the deployed artifact.
   advisory lock); the UI also disables self-demotion and self-blocking.
 - Names: trimmed, 1–80 characters. Scores: 0–99999. Zero clears an entry through the same
   verification process. A trigger also checks direct admin athlete writes, including JSONB.
-- Deleting a reviewer keeps the requests they decided (`decided_by` is set null). Deleting an
-  athlete still deletes their proposals, including verified history (see REVIEW.md).
+- Athletes are archived, not deleted: archiving hides them from boards, the Latest feed and
+  the Hall of Fame and keeps their records, history and member link. Signing in again with
+  the same GitHub account (Supabase matches GitHub's permanent account id, not the login
+  text) finds the link, and `restore_my_athlete()` lets that member restore it; approving a
+  claim of an archived athlete also restores it. PR/achievement/rename requests are refused
+  for archived athletes. `app.athletes` holds the athletes on the boards, `app.allAthletes`
+  everyone (lookups, members, claims, the Athletes dialog).
+- "Delete permanently" (only from the Athletes dialog's archived section) is for erasure
+  requests: it still cascades to all their proposals, including verified history.
+- Deleting a member's account keeps the requests they made and decided (`proposer` and
+  `decided_by` become null; the UI says "a former member"). Such orphaned requests can be
+  rejected but never approved or withdrawn.
 - Bootstrap admin is GitHub login `587763`, only with GitHub provider metadata. Missing login
   metadata creates an ordinary pending profile.
 
@@ -151,9 +164,11 @@ still advances. A PR verified while the board is open gets a celebration banner.
 
 ## Database upgrades and deployment
 Apply migrations in order through the Supabase SQL Editor before deploying the frontend that
-needs them. 0006 is transactional and idempotent, rewrites no rows, and stops with a named
-athlete if any stored value breaks its unit. The frontend works without 0006 except Withdraw,
-which reports that it is unavailable. Tests execute migrations in local Postgres (PGlite).
+needs them; production has 0002–0007 (0001 was superseded). Since 3.2 the frontend selects
+`athletes.archived_at`, so it cannot load boards on a database without 0007. Migrations are
+transactional and idempotent and rewrite no rows; 0006 stops with a named athlete if a
+stored value breaks its unit. Tests execute migrations in local Postgres (PGlite). Check the
+backup workflow ran recently before applying one (see Backups).
 
 For a live upgrade: paste the numbered migration into Supabase SQL Editor, or use a SQL
 client that supports multi-statement transactions. Never use `supabase db push`: the

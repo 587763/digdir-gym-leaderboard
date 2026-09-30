@@ -42,6 +42,10 @@ witnesses it):
   themselves.
 - **Changed your mind?** Withdraw your own pending request from My PRs, the claim dialog,
   or the review list.
+- **Leaving the office?** Admins archive athletes instead of deleting them: they leave the
+  boards but keep every record and verified PR. Sign in again with the same GitHub account
+  and you'll be offered to bring your athlete back; athletes without a linked account can
+  be claimed again. Permanent deletion is still there for data-removal requests.
 - Blocked accounts cannot submit or approve changes. Requests are validated, repeated
   submissions are deduplicated, and stale PR requests cannot overwrite newer records.
   Admin forms also detect concurrent edits instead of overwriting someone else’s changes.
@@ -78,9 +82,10 @@ npm run test:browser  # layout checks in your local Chrome (desktop, phone, TV)
 
 The local server serves only the website files, with caching disabled. It never exposes
 workspace files such as `.env`. To try forms without touching the real board, open
-`http://localhost:3000/?fixture=admin`. Other local fixtures: `empty`, `error`, and `large`
-(65 athletes; combine with `&tv&rotate=120` to inspect TV pagination), and `layout`
-(long medalist names and maximum scores). All fixture writes
+`http://localhost:3000/?fixture=admin`. Other local fixtures: `returning` (a member whose
+athlete was archived), `empty`, `error`, and `large` (65 athletes; combine with
+`&tv&rotate=120` to inspect TV pagination), and `layout` (long medalist names and maximum
+scores). All fixture writes
 stay in memory, and fixtures are excluded from the deployed site.
 
 The boards use shared ranks for ties (1, 1, 3). A zero value means no entry. Enter weights
@@ -92,12 +97,11 @@ Equal decimal totals share the same rank. TV rotation pauses while a dialog is o
 The [repository review](REVIEW.md) records what the September 2026 reviews changed, how it
 was verified, and the remaining follow-ups.
 
-For an existing database, apply
-[`0006_member_safeguards.sql`](supabase/migrations/0006_member_safeguards.sql)
-(after 0005) in the Supabase SQL Editor before deploying this version (the live database
-has it since 30 September 2026). It preserves existing
-data; without it, everything works except withdrawing requests. For a fresh installation,
-use `supabase/schema.sql` instead; that file resets the tables.
+For an existing database, apply the numbered files in
+[`supabase/migrations/`](supabase/migrations/) in order in the Supabase SQL Editor before
+deploying the frontend that needs them (the live database has everything through
+`0007_archive_athletes.sql`). They preserve existing data. For a fresh installation, use
+`supabase/schema.sql` instead; that file resets the tables.
 
 ## Backups
 
