@@ -387,3 +387,61 @@ test('a TV limited with ?tabs starts on a chosen tab and never pages through oth
   app.tv.advance();
   assert.equal(app.activeTab,'total','an excluded tab is left after one dwell');
 });
+test('archived athletes leave the boards and feeds but stay available for lookups', async () => {
+  const at=new Date().toISOString();
+  const {app,document}=await application({
+    listAthletes:async()=>[athlete('a',{name:'Ada',bench:100}),athlete('r',{name:'Rita',bench:150,achievements:['gripper90kg'],archived_at:'2026-08-01T00:00:00Z'})],
+    listRecentPrs:async()=>[{id:'p',athlete_id:'r',payload:{lift:'bench',value:150,previous_value:140},decided_at:at}],
+  });
+  assert.deepEqual(app.athletes.map((a)=>a.id),['a']);
+  assert.equal(document.querySelector('[data-id="r"]'),null,'not on any board or in the Hall of Fame');
+  assert.equal(app.latestPrs().length,0);
+  assert.match(document.getElementById('athleteCount').textContent,/^1 athlete /);
+  assert.equal(app.athleteById('r').name,'Rita','still found for reviews and member links');
+});
+test('a returning member linked to an archived athlete can bring it back', async () => {
+  let restored=false;
+  const {app,store,document}=await application({
+    getSession:async()=>({user:{id:'rita'}}),myProfile:async()=>({user_id:'rita',status:'active',athlete_id:'r'}),
+    listAthletes:async()=>[athlete('r',{name:'Rita',archived_at:'2026-08-01T00:00:00Z'})],
+    restoreMyAthlete:async()=>{restored=true;},
+  });
+  const banner=document.getElementById('welcomeBack');
+  assert.equal(banner.hidden,false);
+  assert.match(banner.textContent,/Welcome back, Rita/);
+  assert.ok(!document.body.classList.contains('is-active'),'My PRs stays hidden while archived');
+  store.listAthletes=async()=>[athlete('r',{name:'Rita',archived_at:null})];
+  await app.restoreMine();
+  assert.equal(restored,true);
+  assert.equal(banner.hidden,true);
+  assert.ok(document.body.classList.contains('is-active'));
+});
+test('admins archive and restore athletes, and delete permanently only from the archive', async () => {
+  const calls=[];
+  const {app,store,document}=await application({
+    getSession:async()=>({user:{id:'boss'}}),myProfile:async()=>({user_id:'boss',is_admin:true,status:'active'}),
+    listAthletes:async()=>[athlete('a',{name:'Ada'}),athlete('r',{name:'Rita',archived_at:'2026-08-01T00:00:00Z'})],
+    adminSetArchived:async(id,archived)=>calls.push([id,archived]),
+  });
+  app.openAthletes();
+  const list=document.getElementById('athletesList');
+  const control=(action,id)=>list.querySelector(`[data-action="${action}"][data-id="${id}"]`);
+  assert.ok(control('archive','a') && !control('delete','a'),'active athletes are archived, not deleted');
+  assert.ok(control('restore','r') && control('delete','r'));
+  assert.ok(control('restore','r').closest('details'),'archived athletes sit in their own section');
+  await app.setArchived('a',true);
+  await app.setArchived('r',false);
+  assert.deepEqual(calls,[['a',true],['r',false]]);
+});
+test('the claim dialog offers archived athletes to people coming back', async () => {
+  const {app,document}=await application({
+    getSession:async()=>({user:{id:'me'}}),myProfile:async()=>({user_id:'me',status:'pending',athlete_id:null}),
+    listAthletes:async()=>[athlete('a',{name:'Ada'}),athlete('r',{name:'Rita',archived_at:'2026-08-01T00:00:00Z'})],
+  });
+  app.openClaim();
+  const group=document.querySelector('#claimSelect optgroup');
+  assert.match(group.getAttribute('label'),/Archived/);
+  assert.ok(group.querySelector('option[value="r"]'));
+  assert.equal(document.querySelector('#claimSelect > option[value="a"]').textContent,'Ada');
+  assert.match(String(app.describeRequest({kind:'claim',athlete_id:'r',payload:{}})),/approving brings them back/);
+});

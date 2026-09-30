@@ -15,7 +15,8 @@ const CELEBRATE_MS = 30 * 60000;     // cheer PRs verified in the last half hour
 
 class LeaderboardApp {
   constructor() {
-    this.athletes = [];
+    this.allAthletes = []; // every athlete, including archived ones
+    this.athletes = [];    // the athletes on the boards (not archived)
     this.profiles = [];
     this.proposals = [];
     this.recentPrs = [];
@@ -39,6 +40,9 @@ class LeaderboardApp {
   get isLinked() { return !!this.profile?.athlete_id; }
   get isActive() { return this.profile?.status === 'active' && this.isLinked; }
   get myAthleteId() { return this.profile?.athlete_id ?? null; }
+  // Archived athletes keep their member link: signing in with the same GitHub account
+  // brings the member back to it, and they can restore it themselves.
+  get myAthleteArchived() { return !!this.athleteById(this.myAthleteId)?.archived_at; }
 
   async init() {
     this.buildForms();
@@ -105,6 +109,7 @@ class LeaderboardApp {
           const board = await this.withTimeout(this.readBoard());
           if (version !== this.identityVersion) { this.refreshRequested = true; continue; }
           Object.assign(this, board, { loadError: null });
+          this.athletes = this.allAthletes.filter((a) => !a.archived_at);
           this.cheerNewPrs();
         } catch (error) {
           if (version !== this.identityVersion) { this.refreshRequested = true; continue; }
@@ -133,7 +138,7 @@ class LeaderboardApp {
       user ? Store.listProfiles() : [],
       user ? Store.listPendingProposals() : [],
     ]);
-    return { user, athletes, recentPrs, profile, profiles, proposals };
+    return { user, allAthletes: athletes, recentPrs, profile, profiles, proposals };
   }
 
   withTimeout(promise, ms = this.readTimeoutMs) {
@@ -148,7 +153,7 @@ class LeaderboardApp {
   // re-renders once "just now" should read "5 minutes ago" or a 🔥 week runs out, while
   // truly unchanged refreshes still leave focused controls and open dialogs alone.
   boardSnapshot() {
-    return JSON.stringify([this.user, this.profile, this.athletes, this.profiles,
+    return JSON.stringify([this.user, this.profile, this.allAthletes, this.profiles,
       this.proposals, this.recentPrs, this.loading, !!this.loadError,
       this.latestPrs().map((item) => UI.timeAgo(item.at)), [...this.freshPrs().keys()],
       this.proposals.map((p) => UI.timeAgo(p.created_at))]);
@@ -159,7 +164,7 @@ class LeaderboardApp {
     return this.recentPrs.map((p) => ({
       id: p.id, athlete: this.athleteById(p.athlete_id), lift: p.payload?.lift, at: p.decided_at,
       value: Number(p.payload?.value), previous: Number(p.payload?.previous_value ?? 0),
-    })).filter((item) => item.athlete && Lifts.get(item.lift) && Lifts.improves(item.lift, item.previous, item.value))
+    })).filter((item) => item.athlete && !item.athlete.archived_at && Lifts.get(item.lift) && Lifts.improves(item.lift, item.previous, item.value))
       .slice(0, LATEST_LIMIT);
   }
 
@@ -189,10 +194,10 @@ class LeaderboardApp {
   }
 
   // --- lookups --------------------------------------------------------------
-  athleteById(id) { return this.athletes.find((a) => a.id === id); }
+  athleteById(id) { return this.allAthletes.find((a) => a.id === id); }
   profileByUser(id) { return this.profiles.find((p) => p.user_id === id); }
   ownerOf(athleteId) { return this.profiles.find((p) => p.athlete_id === athleteId); }
-  unclaimedAthletes() { return this.athletes.filter((a) => !this.ownerOf(a.id)); }
+  unclaimedAthletes() { return this.allAthletes.filter((a) => !this.ownerOf(a.id)); }
   // Proposals the current user may decide: admins everything, members their peers' PRs.
   reviewable() {
     if (!this.signedIn) return [];
@@ -283,7 +288,8 @@ class LeaderboardApp {
     const b = document.body.classList;
     b.toggle('signed-in', this.signedIn);
     b.toggle('is-admin', this.isAdmin);
-    b.toggle('is-active', this.isActive);
+    b.toggle('is-active', this.isActive && !this.myAthleteArchived);
+    this.renderWelcomeBack();
     b.toggle('can-claim', this.signedIn && !this.isLinked && this.profile?.status !== 'blocked');
     b.toggle('can-review', this.signedIn && (this.isAdmin || this.isActive));
 
@@ -298,6 +304,21 @@ class LeaderboardApp {
       : this.profile?.status === 'blocked' ? html`<span class="auth-user view-only">${name} · blocked</span>`
       : html`<span class="auth-user view-only" title="Claim an athlete and wait for an admin to approve">⏳ ${name} · awaiting a spot</span>`;
     area.innerHTML = html`${badge}<button type="button" id="signOutBtn" class="btn btn-ghost" data-action="sign-out">Sign out</button>`;
+  }
+
+  renderWelcomeBack() {
+    const banner = document.getElementById('welcomeBack');
+    const a = this.athleteById(this.myAthleteId);
+    banner.hidden = !(this.signedIn && a?.archived_at && this.profile?.status !== 'blocked');
+    if (banner.hidden) return;
+    banner.innerHTML = html`<p><strong>👋 Welcome back, ${a.name}!</strong> Your athlete is archived, so you're not on the boards right now. Your records and verified history are all still here.</p>
+      <button type="button" class="btn btn-primary" data-action="restore-mine">Bring my athlete back</button>`;
+  }
+
+  async restoreMine() {
+    await Store.restoreMyAthlete();
+    await this.refreshAll();
+    UI.toast('Welcome back! Your athlete is on the boards again.', 'success');
   }
 
   showConfigBanner() {
@@ -365,7 +386,10 @@ class LeaderboardApp {
       'close-dialog': (_id, el) => UI.dialogs.close(el.closest('dialog').id),
       history: (id) => this.openHistory(id),
       edit: (id) => this.openAthleteEditor(id),
+      archive: (id) => this.setArchived(id, true),
+      restore: (id) => this.setArchived(id, false),
       delete: (id) => this.deleteAthlete(id),
+      'restore-mine': () => this.restoreMine(),
       approve: (id) => this.decide(id, true),
       reject: (id) => this.decide(id, false),
       withdraw: (id) => this.withdraw(id),
@@ -532,10 +556,12 @@ class LeaderboardApp {
   openClaim() {
     if (!this.signedIn) return UI.toast('Sign in first', 'error');
     if (this.isLinked) return UI.toast("You're already linked to an athlete", 'error');
-    const unclaimed = this.unclaimedAthletes();
+    const unclaimed = this.unclaimedAthletes().sort((a, b) => a.name.localeCompare(b.name));
+    const onBoard = unclaimed.filter((a) => !a.archived_at), archived = unclaimed.filter((a) => a.archived_at);
+    const option = (a) => html`<option value="${a.id}">${a.name}</option>`;
     const select = document.getElementById('claimSelect');
     select.innerHTML = html`<option value="">${unclaimed.length ? '— choose an existing athlete —' : '— every athlete is claimed; add yourself below —'}</option>${
-      unclaimed.map((a) => html`<option value="${a.id}">${a.name}</option>`)}`;
+      onBoard.map(option)}${archived.length > 0 && html`<optgroup label="Archived — coming back?">${archived.map(option)}</optgroup>`}`;
     select.disabled = unclaimed.length === 0;
     document.getElementById('claimNewName').value = '';
     this.renderOwnRequests('claimPending', ['claim', 'new_athlete']);
@@ -557,6 +583,7 @@ class LeaderboardApp {
   // --- my athlete (propose changes) -------------------------------------------
   openMine() {
     if (!this.isActive) return UI.toast('Claim an athlete first (and wait for approval)', 'error');
+    if (this.myAthleteArchived) return UI.toast('Your athlete is archived. Bring it back first.', 'error');
     const a = this.athleteById(this.myAthleteId);
     if (!a) return UI.toast('Your athlete is missing', 'error');
     document.getElementById('mineName').value = a.name;
@@ -636,7 +663,7 @@ class LeaderboardApp {
       }
       case 'rename': return html`<strong>${name}</strong>: rename to <strong>${p.payload.name}</strong>`;
       case 'new_athlete': return html`Add a new athlete: <strong>${p.payload.name}</strong>`;
-      case 'claim': return html`Link to athlete <strong>${name}</strong>`;
+      case 'claim': return html`Link to athlete <strong>${name}</strong>${athlete?.archived_at && html` <span class="tag tag-admin">archived: approving brings them back</span>`}`;
       default: return html`${p.kind}`;
     }
   }
@@ -672,7 +699,7 @@ class LeaderboardApp {
         <div class="review-desc">
           <span class="tag ${p.approval === 'peer' ? 'tag-peer' : 'tag-admin'}">${p.approval === 'peer' ? 'peer' : 'admin'}</span>
           ${this.describeRequest(p)}
-          <span class="by">· ${who ? `@${who}` : 'someone'}${p.created_at && ` · ${UI.timeAgo(p.created_at)}`}</span>
+          <span class="by">· ${who ? `@${who}` : p.proposer ? 'someone' : 'a former member'}${p.created_at && ` · ${UI.timeAgo(p.created_at)}`}</span>
           ${stale && html`<span class="tag tag-warn" title="The record changed after this was submitted">outdated — reject it and submit again</span>`}
         </div>
         <div class="review-actions">${actions(stale)}</div>
@@ -714,10 +741,10 @@ class LeaderboardApp {
       const linked = this.athleteById(p.athlete_id);
       const asks = this.proposals.filter((q) => q.proposer === p.user_id && ['claim', 'new_athlete'].includes(q.kind));
       const login = p.github_login || p.user_id;
-      const options = this.athletes.map((a) => {
+      const options = [...this.allAthletes].sort((a, b) => a.name.localeCompare(b.name)).map((a) => {
         const takenBy = this.ownerOf(a.id);
         const taken = takenBy && takenBy.user_id !== p.user_id;
-        return html`<option value="${a.id}"${a.id === p.athlete_id && raw(' selected')}${taken && raw(' disabled')}>${a.name}${taken && ' (claimed)'}</option>`;
+        return html`<option value="${a.id}"${a.id === p.athlete_id && raw(' selected')}${taken && raw(' disabled')}>${a.name}${a.archived_at && ' (archived)'}${taken && ' (claimed)'}</option>`;
       });
       const selfNote = self && raw(' disabled title="You can\'t change your own admin access or block yourself"');
       return html`<div class="user-row">
@@ -725,7 +752,7 @@ class LeaderboardApp {
           <strong>${login}</strong>${self && html` <span class="status-chip status-self">you</span>`}
           <span class="status-chip status-${p.status}">${p.status}</span>
           ${p.is_admin && html`<span class="status-chip status-admin">admin</span>`}
-          ${linked && html`<span class="linked-to">→ ${linked.name}</span>`}
+          ${linked && html`<span class="linked-to">→ ${linked.name}${linked.archived_at && ' (archived)'}</span>`}
           ${asks.map((q) => html`<span class="linked-to">asks: ${q.kind === 'claim' ? this.athleteById(q.athlete_id)?.name || 'an athlete' : `new athlete “${q.payload.name}”`}</span>`)}
         </div>
         <div class="user-controls">
@@ -769,27 +796,44 @@ class LeaderboardApp {
 
   renderAthletesList() {
     const container = document.getElementById('athletesList');
-    if (this.athletes.length === 0) { container.innerHTML = html`<p class="empty-state">No athletes yet.</p>`; return; }
+    if (this.allAthletes.length === 0) { container.innerHTML = html`<p class="empty-state">No athletes yet.</p>`; return; }
     const query = document.getElementById('athleteFilter').value.trim().toLocaleLowerCase();
-    const shown = [...this.athletes].sort((a, b) => a.name.localeCompare(b.name))
+    const shown = [...this.allAthletes].sort((a, b) => a.name.localeCompare(b.name))
       .filter((a) => !query || a.name.toLocaleLowerCase().includes(query));
     if (shown.length === 0) { container.innerHTML = html`<p class="empty-state">No athlete matches “${query}”.</p>`; return; }
     const pending = this.pendingAthletes();
-    container.innerHTML = html`${shown.map((a) => {
+    const card = (a) => {
       const owner = this.ownerOf(a.id);
       const stats = [...Lifts.all, Lifts.get('total')].filter((e) => Lifts.value(a, e.id) > 0);
-      return html`<div class="athlete-card">
+      const actions = a.archived_at
+        ? html`<button type="button" class="btn btn-edit" data-action="restore" data-id="${a.id}" aria-label="Restore ${a.name}">Restore</button>
+          <button type="button" class="btn btn-danger" data-action="delete" data-id="${a.id}" aria-label="Delete ${a.name} permanently">Delete permanently</button>`
+        : html`<button type="button" class="btn btn-edit" data-action="edit" data-id="${a.id}" aria-label="Edit ${a.name}">Edit</button>
+          <button type="button" class="btn btn-secondary" data-action="archive" data-id="${a.id}" aria-label="Archive ${a.name}">Archive</button>`;
+      return html`<div class="athlete-card${a.archived_at && ' archived'}">
         <div class="athlete-card-avatar">${raw(window.renderAvatar(a, 52, { decorative: true }))}</div>
         <div class="athlete-card-info">
           <h3>${a.name}${BoardView.badges(a)}${pending.has(a.id) && raw('<span class="badge-chip pending" title="Has a pending change">⏳</span>')}${owner && html`<span class="linked-to">@${owner.github_login}</span>`}</h3>
           <div class="athlete-stats">${stats.length ? stats.map((e) => html`<span title="${e.label}"><span aria-hidden="true">${e.emoji}</span> <strong>${Lifts.format(e.id, Lifts.value(a, e.id))}</strong></span>`) : html`<span>No records yet</span>`}</div>
         </div>
-        <div class="athlete-card-actions">
-          <button type="button" class="btn btn-edit" data-action="edit" data-id="${a.id}" aria-label="Edit ${a.name}">Edit</button>
-          <button type="button" class="btn btn-danger" data-action="delete" data-id="${a.id}" aria-label="Delete ${a.name}">Delete</button>
-        </div>
+        <div class="athlete-card-actions">${actions}</div>
       </div>`;
-    })}`;
+    };
+    const active = shown.filter((a) => !a.archived_at), archived = shown.filter((a) => a.archived_at);
+    container.innerHTML = html`${active.map(card)}${archived.length > 0 && html`
+      <details class="archived-list"${query && raw(' open')}>
+        <summary>Archived (${archived.length}) · off the boards, records and history kept</summary>
+        ${archived.map(card)}
+      </details>`}`;
+  }
+
+  // Archiving is reversible and keeps records and history; members linked to an
+  // archived athlete can bring it back themselves when they return.
+  async setArchived(id, archived) {
+    const a = this.athleteById(id);
+    await Store.adminSetArchived(id, archived);
+    await this.refreshAll();
+    UI.toast(archived ? `${a?.name ?? 'Athlete'} archived: off the boards, history kept` : `${a?.name ?? 'Athlete'} is back on the boards`, 'success');
   }
 
   openAthleteEditor(athleteId = null) {
@@ -830,12 +874,13 @@ class LeaderboardApp {
     UI.toast('Saved', 'success');
   }
 
+  // Only for data-erasure requests: removes the athlete and all their proposals for good.
   async deleteAthlete(id) {
     const a = this.athleteById(id);
-    if (!confirm(`Delete ${a?.name ?? 'this athlete'}? Their verified PR history is deleted too. This can't be undone.`)) return;
+    if (!confirm(`Permanently delete ${a?.name ?? 'this athlete'}? This erases their records and verified history for good. Use it only when someone asks to have their data removed; archiving keeps everything.`)) return;
     await Store.adminDeleteAthlete(id);
     await this.refreshAll();
-    UI.toast('Deleted', 'success');
+    UI.toast('Deleted permanently', 'success');
   }
 
   // --- history / progression --------------------------------------------------

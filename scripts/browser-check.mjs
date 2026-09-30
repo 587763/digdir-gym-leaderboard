@@ -22,9 +22,9 @@ const TABS = ['lifts', 'total', 'other', 'cardio', 'latest', 'fun'];
 const DIALOGS = ['app.openMine()', 'app.openReview()', 'app.openMembers()', 'app.openAthletes()',
   "app.openAthleteEditor('athlete-1')", "app.openHistory('athlete-1')", "UI.dialogs.open('claimModal')"];
 const SCREENS = [
-  { name: 'desktop', width: 1440, height: 1000, fixtures: ['admin', 'layout', 'empty', 'error'] },
+  { name: 'desktop', width: 1440, height: 1000, fixtures: ['admin', 'returning', 'layout', 'empty', 'error'] },
   { name: 'tablet', width: 820, height: 1180, fixtures: ['admin'] },
-  { name: 'phone', width: 390, height: 844, fixtures: ['admin', 'layout'] },
+  { name: 'phone', width: 390, height: 844, fixtures: ['admin', 'returning', 'layout'] },
   { name: 'tv-1080p', width: 1920, height: 1080, tv: true, fixtures: ['large', 'layout', 'admin'] },
   { name: 'tv-720p', width: 1280, height: 720, tv: true, fixtures: ['large', 'layout'] },
   { name: 'tv-zoomed', width: 2400, height: 1350, tv: true, fixtures: ['layout'] },
