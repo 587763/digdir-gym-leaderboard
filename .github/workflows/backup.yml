@@ -18,6 +18,7 @@ on:
 
 permissions:
   contents: read
+  actions: write   # only for the keepalive step, which re-enables this workflow
 
 concurrency:
   group: db-backup
@@ -68,3 +69,12 @@ jobs:
           path: ${{ env.DUMP_FILE }}
           retention-days: 90
           if-no-files-found: error
+
+      - name: Keep the schedule alive
+        # GitHub disables scheduled workflows after 60 days without repository activity;
+        # this one silently stopped on 2026-08-30. Re-enabling itself on every run resets
+        # that timer. Runs even when the backup failed, so failures stay visible daily.
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh api -X PUT "repos/${{ github.repository }}/actions/workflows/backup.yml/enable"
