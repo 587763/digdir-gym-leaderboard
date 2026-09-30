@@ -5,7 +5,8 @@ import { read, environment } from './helpers.mjs';
 
 let db;
 const ids = Object.fromEntries(['admin','member','peer','pending','blocked','missing','deputy','newcomer','reviewer'].map((key,i)=>[key,`00000000-0000-4000-8000-${String(i+1).padStart(12,'0')}`]));
-const governance='supabase/migrations/0005_governance_hardening.sql', safeguards='supabase/migrations/0006_member_safeguards.sql';
+const governance='supabase/migrations/0005_governance_hardening.sql', safeguards='supabase/migrations/0006_member_safeguards.sql',
+  archiving='supabase/migrations/0007_archive_athletes.sql';
 let athletes, freshCatalog;
 async function as(user) {
   await db.exec('reset role');
@@ -17,6 +18,16 @@ async function propose(kind, athleteId, payload) {
 }
 async function decide(id, approve=true) { return db.query('select public.decide($1,$2)',[id,approve]); }
 async function withdraw(id) { return db.query('select public.withdraw($1)',[id]); }
+async function restore() { return (await db.query('select public.restore_my_athlete() as id')).rows[0].id; }
+// Rows as stored, read past RLS.
+async function stored(sql,params=[]) { await db.exec('reset role'); return (await db.query(sql,params)).rows; }
+// Admins archive and restore athletes with ordinary updates.
+async function setArchived(id,archived) {
+  await as('admin');
+  assert.equal((await db.query(`update athletes set archived_at=${archived?'now()':'null'} where id=$1 returning id`,[id])).rows.length,1);
+}
+// Every row of the governed tables, to show that an upgrade rewrites nothing.
+const allRows=()=>Promise.all(['athletes','profiles','proposals'].map(async(table)=>(await db.query(`select * from ${table} order by 1`)).rows));
 // A Supabase-like database installed from the fresh schema alone.
 async function database() {
   const pg = new PGlite();
@@ -44,7 +55,7 @@ async function catalog(pg) {
 const fresh=()=>freshCatalog??=database().then(async(pg)=>{try{return await catalog(pg);}finally{await pg.close();}});
 before(async()=>{
   db = await database();
-  for(const file of [governance,governance,safeguards,safeguards]) await db.exec(read(file));
+  for(const file of [governance,governance,safeguards,safeguards,archiving,archiving]) await db.exec(read(file));
   await db.exec('grant usage on schema public,auth to authenticated,anon; grant select,insert,update,delete on all tables in schema public to authenticated; grant select on all tables in schema public to anon;');
   for(const [name,id] of Object.entries(ids)) {
     if(name==='missing') continue;
@@ -63,7 +74,13 @@ test('fresh schema and idempotent migration preserve the seeded athletes',async(
   assert.equal((await db.query('select is_admin() as ok')).rows[0].ok,true);
 });
 test('fresh schema already contains every migrated definition',async()=>{
-  assert.deepEqual(await catalog(db),await fresh());
+  const migrated=await catalog(db);
+  assert.deepEqual(migrated,await fresh());
+  // Including what the newest migration adds and changes.
+  const def=(name)=>migrated.find((row)=>row.name===name)?.def;
+  assert.ok(def('athletes.archived_at')&&def('restore_my_athlete()'));
+  assert.equal(def('proposals.proposer'),'uuid YES');
+  assert.match(def('proposals.proposals_proposer_fkey'),/ON DELETE SET NULL/);
 });
 test('signup without metadata succeeds and cannot bootstrap an admin',async()=>{
   await db.exec('reset role');
@@ -220,19 +237,152 @@ test('PR proposals must change the recorded value',async()=>{
   // Zero still clears a recorded exercise.
   await withdraw(await propose('pr',athletes[0].id,{lift:'deadhang',value:0}));
 });
-test('deleting a reviewer keeps the requests they decided',async()=>{
+test('deleting a member keeps the requests they made and decided',async()=>{
+  const jens=athletes[3].id;
   await as('reviewer');
-  await withdraw(await propose('claim',athletes[3].id,{}));
+  const claim=await propose('claim',jens,{});
+  await withdraw(claim);
   await db.exec('reset role');
-  await db.query("update profiles set status='active',athlete_id=$1 where user_id=$2",[athletes[3].id,ids.reviewer]);
+  await db.query("update profiles set status='active',athlete_id=$1 where user_id=$2",[jens,ids.reviewer]);
   await as('member');
   const id=await propose('pr',athletes[0].id,{lift:'pushups',value:40});
   await as('reviewer'); await decide(id);
-  await db.exec('reset role');
+  // Their own verified PR, and requests still waiting when they leave.
+  const verified=await propose('pr',jens,{lift:'squat',value:100});
+  await as('member'); await decide(verified);
+  await as('reviewer');
+  const waiting=[await propose('pr',jens,{lift:'squat',value:105}),await propose('rename',jens,{name:'Jens R'})];
+  const athlete=await stored('select * from athletes where id=$1',[jens]);
   await db.query('delete from auth.users where id=$1',[ids.reviewer]);
   assert.deepEqual((await db.query('select status,decided_by from proposals where id=$1',[id])).rows,[{status:'approved',decided_by:null}]);
-  // Their own requests still go with their profile.
-  assert.equal((await db.query('select count(*)::int as n from proposals where proposer=$1',[ids.reviewer])).rows[0].n,0);
+  // Their own requests stay too, without a proposer, and their athlete is intact.
+  assert.deepEqual(await stored('select status,proposer from proposals where id=any($1::uuid[]) order by array_position($1::uuid[],id)',[[claim,verified,...waiting]]),
+    ['rejected','approved','pending','pending'].map((status)=>({status,proposer:null})));
+  assert.deepEqual(await stored('select * from athletes where id=$1',[jens]),athlete);
+  // Their verified PR is still public history.
+  await db.exec('set role anon');
+  assert.deepEqual((await db.query('select id from proposals where athlete_id=$1',[jens])).rows,[{id:verified}]);
+});
+test('requests left by a deleted member can be rejected, but not approved or withdrawn',async()=>{
+  const orphans=await stored("select kind,id from proposals where proposer is null and status='pending' order by kind");
+  assert.deepEqual(orphans.map((row)=>row.kind),['pr','rename']);
+  const [pr,rename]=orphans.map((row)=>row.id);
+  for(const user of ['member','admin']) {
+    await as(user); await assert.rejects(()=>withdraw(pr),/your own requests/,user);
+  }
+  // Approval needs the proposer, so a peer rejects the PR and an admin the rename.
+  for(const [user,id] of [['peer',pr],['admin',rename]]) {
+    await as(user);
+    await assert.rejects(()=>decide(id),/proposer is unavailable/,user);
+    await decide(id,false);
+  }
+  assert.deepEqual(await stored('select status,decided_by from proposals where id=any($1::uuid[]) order by array_position($1::uuid[],id)',[[pr,rename]]),
+    [{status:'rejected',decided_by:ids.peer},{status:'rejected',decided_by:ids.admin}]);
+});
+test('only admins archive athletes, which keeps their records, link and history',async()=>{
+  const id=athletes[0].id;
+  await as('member');
+  const pending=await propose('pr',id,{lift:'bench',value:155});
+  const kept=async()=>[await stored('select name,bench,squat,deadlift,lifts,achievements,avatar,created_at from athletes where id=$1',[id]),
+    await stored('select user_id from profiles where athlete_id=$1',[id]),await stored('select * from proposals where athlete_id=$1 order by id',[id])];
+  const before=await kept();
+  // Members cannot archive directly, not even their own athlete (RLS).
+  for(const user of ['member','peer']) {
+    await as(user);
+    assert.equal((await db.query('update athletes set archived_at=now() where id=$1 returning id',[id])).rows.length,0,user);
+  }
+  await setArchived(id,true);
+  assert.deepEqual(await kept(),before);
+  // Signed-out visitors still see the athlete and its verified PRs.
+  await db.exec('set role anon');
+  assert.equal((await db.query('select count(*)::int as n from athletes where id=$1 and archived_at is not null',[id])).rows[0].n,1);
+  const verified=before[2].filter((row)=>row.kind==='pr'&&row.status==='approved').map((row)=>({id:row.id}));
+  assert.ok(verified.length>0);
+  assert.deepEqual((await db.query('select id from proposals where athlete_id=$1 order by id',[id])).rows,verified);
+  // An admin restores it with an ordinary update; the request made before is still pending.
+  await setArchived(id,false);
+  await as('member'); await withdraw(pending);
+});
+test('archived athletes take no PR, achievement or name changes until restored',async()=>{
+  const id=athletes[1].id;
+  const changes=[['pr',{lift:'bench',value:115}],['achievement',{achievement_id:'gripper90kg',op:'add'}],['rename',{name:'Dan'}]];
+  await as('peer');
+  const waiting=[];
+  for(const [kind,payload] of changes) waiting.push(await propose(kind,id,payload));
+  const record=()=>stored('select name,bench,achievements from athletes where id=$1',[id]);
+  const before=await record();
+  await setArchived(id,true);
+  // Nobody can propose them, admins included, and retrying a pending request is refused too.
+  for(const user of ['peer','admin']) {
+    await as(user);
+    for(const [kind,payload] of changes) await assert.rejects(()=>propose(kind,id,payload),/that athlete is archived/,`${user}: ${kind}`);
+  }
+  // Requests made before the archive can be rejected, but not approved.
+  for(const [user,request] of [['member',waiting[0]],['member',waiting[1]],['admin',waiting[2]]]) {
+    await as(user);
+    await assert.rejects(()=>decide(request),/archived; restore it first/,user);
+    await decide(request,false);
+  }
+  assert.deepEqual(await record(),before);
+  assert.deepEqual((await stored('select status from proposals where id=any($1::uuid[])',[waiting])).map((row)=>row.status),['rejected','rejected','rejected']);
+  await setArchived(id,false);
+});
+test('a linked member restores their own archived athlete and nothing else',async()=>{
+  const [own,other]=[athletes[0].id,athletes[3].id];
+  await setArchived(own,true); await setArchived(other,true);
+  // Members still cannot un-archive directly (RLS).
+  await as('member');
+  assert.equal((await db.query('update athletes set archived_at=null where id=$1 returning id',[own])).rows.length,0);
+  for(const [user,error] of [['signed-out',/not authenticated/],['missing',/no profile/],['blocked',/blocked/],['newcomer',/not linked to an athlete/]]) {
+    await as(user); await assert.rejects(restore,error,user);
+  }
+  // Blocking a linked member stops them too.
+  await db.exec('reset role');
+  await db.query("update profiles set status='blocked' where user_id=$1",[ids.member]);
+  await as('member'); await assert.rejects(restore,/blocked/);
+  await db.exec('reset role');
+  await db.query("update profiles set status='active' where user_id=$1",[ids.member]);
+  const others=()=>stored('select * from athletes where id<>$1 order by id',[own]);
+  const untouched=await others();
+  await as('member'); assert.equal(await restore(),own);
+  const restored=await stored('select * from athletes where id=$1',[own]);
+  assert.equal(restored[0].archived_at,null);
+  // Restoring again changes nothing, and no other athlete, archived or not, is touched.
+  await as('member'); assert.equal(await restore(),own);
+  assert.deepEqual(await stored('select * from athletes where id=$1',[own]),restored);
+  assert.deepEqual(await others(),untouched);
+  // Back on the boards, the member can propose changes again.
+  await as('member'); await withdraw(await propose('pr',own,{lift:'bench',value:155}));
+});
+test('approving a claim restores an archived athlete and links the returning member',async()=>{
+  const id=athletes[3].id;
+  await setArchived(id,true);
+  // Claims stay open, so someone without their old account can ask for their athlete back.
+  await as('newcomer');
+  const claim=await propose('claim',id,{});
+  assert.notEqual((await stored('select archived_at from athletes where id=$1',[id]))[0].archived_at,null);
+  await as('admin'); await decide(claim);
+  assert.deepEqual(await stored('select archived_at from athletes where id=$1',[id]),[{archived_at:null}]);
+  assert.deepEqual(await stored('select status,athlete_id from profiles where user_id=$1',[ids.newcomer]),[{status:'active',athlete_id:id}]);
+  assert.deepEqual(await stored('select status,decided_by from proposals where id=$1',[claim]),[{status:'approved',decided_by:ids.admin}]);
+});
+test('permanently deleting an athlete still erases its requests and history',async()=>{
+  await as('admin');
+  const id=(await db.query("insert into athletes(name) values('Erased') returning id")).rows[0].id;
+  await as('deputy');
+  const claim=await propose('claim',id,{});
+  // Approving a claim of an athlete on the boards leaves the athlete as it was.
+  const record=await stored('select * from athletes where id=$1',[id]);
+  await as('admin'); await decide(claim);
+  assert.deepEqual(await stored('select * from athletes where id=$1',[id]),record);
+  await as('deputy'); const pr=await propose('pr',id,{lift:'bench',value:100});
+  await as('peer'); await decide(pr);
+  await as('deputy'); const rename=await propose('rename',id,{name:'Erased again'});
+  await setArchived(id,true);
+  assert.equal((await db.query('delete from athletes where id=$1 returning id',[id])).rows.length,1);
+  assert.deepEqual(await stored('select id from proposals where id=any($1::uuid[])',[[claim,pr,rename]]),[]);
+  // The member's account stays, unlinked.
+  assert.deepEqual(await stored('select athlete_id from profiles where user_id=$1',[ids.deputy]),[{athlete_id:null}]);
 });
 test('the last working admin cannot be demoted, blocked or deleted',async()=>{
   await db.exec('reset role');
@@ -277,8 +427,9 @@ test('blocked admins lose direct database privileges',async()=>{
 test('fresh schema and migration use identical governance functions',()=>{
   const extract=(sql,name)=>{const start=sql.indexOf(`create or replace function public.${name}(`);assert.ok(start>=0,name);return sql.slice(start,sql.indexOf('$$;',start)+3);};
   // Each function is compared with the migration that last defines it.
-  for(const [file,names] of [[governance,['handle_new_user','is_admin','decide']],
-    [safeguards,['lift_allows_decimals','validate_athlete_values','propose','withdraw','protect_last_admin']]]) {
+  for(const [file,names] of [[governance,['handle_new_user','is_admin']],
+    [safeguards,['lift_allows_decimals','validate_athlete_values','protect_last_admin']],
+    [archiving,['propose','decide','withdraw','restore_my_athlete']]]) {
     for(const name of names) assert.equal(extract(read('supabase/schema.sql'),name),extract(read(file),name),`${file}: ${name}`);
   }
 });
@@ -297,28 +448,52 @@ test('upgrade preserves existing rows and can approve a legacy pending PR',async
   await as('peer');await decide(id);
   assert.equal(Number((await db.query('select squat from athletes where id=$1',[athletes[0].id])).rows[0].squat),130);
 });
-test('upgrading 0005 to 0006 preserves rows and matches the fresh schema',async()=>{
+test('upgrading 0005 to 0006 preserves rows',async()=>{
   await as('member');
   const pending=await propose('pr',athletes[0].id,{lift:'pullups',value:15});
   await db.exec('reset role');
-  // Recreate a 0005 database: older function bodies, no safeguards, another reviewer key name.
+  // Recreate a 0005 database: older function bodies, no safeguards or archiving, requests that
+  // go with their proposer's account (so none without one), and other key names.
   await db.exec(read(governance));
   await db.exec(`drop trigger profiles_protect_last_admin on profiles;
-    drop function protect_last_admin(), withdraw(uuid), lift_allows_decimals(text);
+    drop function protect_last_admin(), withdraw(uuid), lift_allows_decimals(text), restore_my_athlete();
     drop index proposals_recent_prs;
+    alter table athletes drop column archived_at;
+    delete from proposals where proposer is null;
     alter table proposals drop constraint proposals_decided_by_fkey,
-      add constraint proposals_reviewer_fkey foreign key (decided_by) references profiles(user_id);`);
+      add constraint proposals_reviewer_fkey foreign key (decided_by) references profiles(user_id),
+      drop constraint proposals_proposer_fkey, alter column proposer set not null,
+      add constraint proposals_author_fkey foreign key (proposer) references profiles(user_id) on delete cascade;`);
   // A stored value that breaks the new unit rules stops the upgrade before anything changes.
   const odd=(await db.query(`insert into athletes(name,lifts) values('Odd','{"pullups":12.5}') returning id`)).rows[0].id;
   await assert.rejects(()=>db.exec(read(safeguards)),/"Odd" has pullups = 12\.5/);
   await db.exec('rollback');
   assert.equal((await db.query("select to_regprocedure('public.withdraw(uuid)') as fn")).rows[0].fn,null);
   await db.query('delete from athletes where id=$1',[odd]);
-  const rows=()=>Promise.all(['athletes','profiles','proposals'].map(async(table)=>(await db.query(`select * from ${table} order by 1`)).rows));
-  const before=await rows();
+  const before=await allRows();
   await db.exec(read(safeguards));
   await db.exec(read(safeguards));
-  assert.deepEqual(await rows(),before);
-  assert.deepEqual(await catalog(db),await fresh());
+  assert.deepEqual(await allRows(),before);
   await as('member'); await withdraw(pending);
+});
+test('upgrading 0006 to 0007 preserves rows and matches the fresh schema',async()=>{
+  // Continues from the 0006 database the previous test upgraded: no archiving yet, and
+  // requests still go with their proposer's account.
+  await db.exec('reset role');
+  assert.equal((await db.query("select to_regprocedure('public.restore_my_athlete()') as fn")).rows[0].fn,null);
+  assert.match((await db.query("select pg_get_constraintdef(oid) as def from pg_constraint where conname='proposals_author_fkey'")).rows[0].def,/ON DELETE CASCADE/);
+  await as('member');
+  const pending=await propose('pr',athletes[0].id,{lift:'pullups',value:16});
+  await db.exec('reset role');
+  const before=await allRows();
+  await db.exec(read(archiving));
+  await db.exec(read(archiving));
+  const [upgraded,...others]=await allRows();
+  // Every athlete starts on the boards, and nothing else changes.
+  assert.ok(upgraded.every((row)=>row.archived_at===null));
+  assert.deepEqual([upgraded.map(({archived_at,...row})=>row),...others],before);
+  assert.deepEqual(await catalog(db),await fresh());
+  // A request pending across the upgrade can still be verified.
+  await as('peer'); await decide(pending);
+  assert.equal((await stored('select lifts from athletes where id=$1',[athletes[0].id]))[0].lifts.pullups,16);
 });

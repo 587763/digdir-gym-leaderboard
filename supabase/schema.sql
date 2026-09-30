@@ -5,7 +5,10 @@
 -- Governance model: GitHub login for identity; an admin (bootstrapped below) approves
 -- people and links each to one athlete; PR/achievement changes are peer-verified;
 -- name changes / new athletes are admin-approved. Members may withdraw their own pending
--- requests, and at least one working admin always remains. Enforced by RLS + functions.
+-- requests, and at least one working admin always remains. Archived athletes leave the
+-- boards but keep their history; an admin, an approved claim or their linked member
+-- restores them, and only deleting one erases it. Deleting a member's account keeps the
+-- requests they made. Enforced by RLS + functions.
 
 -- ───────────────────────────────────────────────────────────────────────────
 -- Athletes (the board)
@@ -24,7 +27,8 @@ create table public.athletes (
   achievements text[] not null default '{}',
   avatar       jsonb not null default '{}'::jsonb,   -- reserved (future avatar customizer)
   created_at   timestamptz not null default now(),
-  updated_at   timestamptz not null default now()
+  updated_at   timestamptz not null default now(),
+  archived_at  timestamptz                           -- null = on the boards; archived athletes keep their history
 );
 
 create or replace function public.touch_updated_at()
@@ -105,7 +109,7 @@ create table public.proposals (
   kind        text not null check (kind in ('claim','new_athlete','rename','pr','achievement')),
   approval    text not null check (approval in ('admin','peer')),
   athlete_id  uuid references public.athletes(id) on delete cascade,
-  proposer    uuid not null references public.profiles(user_id) on delete cascade,
+  proposer    uuid references public.profiles(user_id) on delete set null,  -- null once their account is deleted
   payload     jsonb not null default '{}'::jsonb,
   status      text not null default 'pending' check (status in ('pending','approved','rejected')),
   decided_by  uuid references public.profiles(user_id) on delete set null,
@@ -210,6 +214,11 @@ begin
     if p_athlete is null or not exists (select 1 from public.athletes where id = p_athlete) then
       raise exception 'athlete not found';
     end if;
+    -- An archived athlete's records stay as they are until it is restored (a claim may restore it).
+    if p_kind in ('pr','achievement','rename')
+       and exists (select 1 from public.athletes where id = p_athlete and archived_at is not null) then
+      raise exception 'that athlete is archived';
+    end if;
   else
     p_athlete := null;
   end if;
@@ -272,7 +281,8 @@ begin
   if pr.approval = 'admin' then
     if not coalesce(prof.is_admin, false) then raise exception 'only an admin can decide this'; end if;
   else
-    if not coalesce(prof.is_admin or (prof.status='active' and prof.athlete_id is not null and uid <> pr.proposer), false) then
+    -- A request left by a deleted account (no proposer) is someone else's, so a peer may reject it.
+    if not coalesce(prof.is_admin or (prof.status='active' and prof.athlete_id is not null and uid is distinct from pr.proposer), false) then
       raise exception 'a different active member (peer) or an admin must verify this';
     end if;
   end if;
@@ -282,6 +292,7 @@ begin
     return;
   end if;
 
+  -- Also refuses requests whose proposer's account was deleted; those can only be rejected.
   select * into proposer_profile from public.profiles where user_id = pr.proposer for update;
   if not found or proposer_profile.status = 'blocked' then raise exception 'proposer is unavailable or blocked'; end if;
   if pr.kind in ('claim','new_athlete') and proposer_profile.athlete_id is not null then
@@ -294,6 +305,10 @@ begin
   if pr.kind <> 'new_athlete' then
     perform 1 from public.athletes where id = pr.athlete_id for update;
     if not found then raise exception 'athlete not found'; end if;
+    if pr.kind in ('pr','achievement','rename')
+       and exists (select 1 from public.athletes where id = pr.athlete_id and archived_at is not null) then
+      raise exception 'that athlete is archived; restore it first';
+    end if;
   end if;
   if pr.kind = 'pr' and pr.payload ? 'previous_value' then
     select case pr.payload->>'lift' when 'bench' then bench when 'squat' then squat
@@ -340,13 +355,16 @@ begin
       raise exception 'that athlete is already claimed';
     end if;
     update public.profiles set athlete_id = pr.athlete_id, status='active' where user_id = pr.proposer;
+    -- A returning person's approved claim puts their archived athlete back on the boards.
+    update public.athletes set archived_at = null where id = pr.athlete_id and archived_at is not null;
   end if;
 
   update public.proposals set status='approved', decided_by=uid, decided_at=now() where id = p_id;
 end; $$;
 
 -- A member withdraws one of their own pending requests of any kind. It is recorded as
--- the proposer rejecting it, so history keeps who closed it and when.
+-- the proposer rejecting it, so history keeps who closed it and when. A request left by a
+-- deleted account has no proposer, so nobody can withdraw it; reviewers reject it instead.
 create or replace function public.withdraw(p_id uuid)
 returns void language plpgsql security definer set search_path = public as $$
 declare uid uuid := auth.uid(); prof public.profiles; pr public.proposals;
@@ -357,8 +375,25 @@ begin
   if prof.status = 'blocked' then raise exception 'your account is blocked'; end if;
   select * into pr from public.proposals where id = p_id and status = 'pending' for update;
   if not found then raise exception 'proposal not found or already decided'; end if;
-  if pr.proposer <> uid then raise exception 'you can only withdraw your own requests'; end if;
+  if pr.proposer is distinct from uid then raise exception 'you can only withdraw your own requests'; end if;
   update public.proposals set status='rejected', decided_by=uid, decided_at=now() where id = p_id;
+end; $$;
+
+-- A member who signs in again with the same account is still linked, so they may put their
+-- own archived athlete back on the boards. An athlete that is not archived stays unchanged.
+create or replace function public.restore_my_athlete()
+returns uuid language plpgsql security definer set search_path = public as $$
+declare uid uuid := auth.uid(); prof public.profiles;
+begin
+  if uid is null then raise exception 'not authenticated'; end if;
+  select * into prof from public.profiles where user_id = uid;
+  if not found then raise exception 'no profile'; end if;
+  if prof.status = 'blocked' then raise exception 'your account is blocked'; end if;
+  if prof.athlete_id is null then raise exception 'you are not linked to an athlete'; end if;
+  perform 1 from public.athletes where id = prof.athlete_id for update;
+  if not found then raise exception 'athlete not found'; end if;
+  update public.athletes set archived_at = null where id = prof.athlete_id and archived_at is not null;
+  return prof.athlete_id;
 end; $$;
 
 create index if not exists proposals_pending_created on public.proposals(created_at) where status = 'pending';
