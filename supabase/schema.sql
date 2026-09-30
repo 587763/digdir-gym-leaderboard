@@ -4,7 +4,8 @@
 --
 -- Governance model: GitHub login for identity; an admin (bootstrapped below) approves
 -- people and links each to one athlete; PR/achievement changes are peer-verified;
--- name changes / new athletes are admin-approved. Enforced by RLS + functions.
+-- name changes / new athletes are admin-approved. Members may withdraw their own pending
+-- requests, and at least one working admin always remains. Enforced by RLS + functions.
 
 -- ───────────────────────────────────────────────────────────────────────────
 -- Athletes (the board)
@@ -62,6 +63,27 @@ drop trigger if exists on_auth_user_created on auth.users;
 create trigger on_auth_user_created
   after insert on auth.users for each row execute function public.handle_new_user();
 
+-- At least one working admin (is_admin and not blocked) must remain. Each removal takes
+-- the same transaction lock before counting, so concurrent removals are checked one at
+-- a time; under READ COMMITTED (PostgREST, SQL Editor) the count sees committed changes.
+create or replace function public.protect_last_admin()
+returns trigger language plpgsql security definer set search_path = public as $$
+begin
+  if old.is_admin and old.status <> 'blocked'
+     and (tg_op = 'DELETE' or not (new.is_admin and new.status <> 'blocked')) then
+    perform pg_advisory_xact_lock(hashtext('public.profiles:admins'));
+    if not exists (select 1 from public.profiles where user_id <> old.user_id
+                   and is_admin and status <> 'blocked') then
+      raise exception 'at least one active admin must remain';
+    end if;
+  end if;
+  if tg_op = 'DELETE' then return old; end if;
+  return new;
+end; $$;
+drop trigger if exists profiles_protect_last_admin on public.profiles;
+create trigger profiles_protect_last_admin before update or delete on public.profiles
+  for each row execute function public.protect_last_admin();
+
 -- ───────────────────────────────────────────────────────────────────────────
 -- Helper functions
 -- ───────────────────────────────────────────────────────────────────────────
@@ -86,7 +108,7 @@ create table public.proposals (
   proposer    uuid not null references public.profiles(user_id) on delete cascade,
   payload     jsonb not null default '{}'::jsonb,
   status      text not null default 'pending' check (status in ('pending','approved','rejected')),
-  decided_by  uuid references public.profiles(user_id),
+  decided_by  uuid references public.profiles(user_id) on delete set null,
   decided_at  timestamptz,
   created_at  timestamptz not null default now()
 );
@@ -114,10 +136,19 @@ create policy "approved PRs are public history" on public.proposals for select u
 -- ───────────────────────────────────────────────────────────────────────────
 -- Governed write paths
 -- ───────────────────────────────────────────────────────────────────────────
+-- Whether a lift takes one decimal (kg) instead of whole repetitions or seconds.
+-- Keep aligned with js/lifts.js: list each extra exercise whose unit is 'kg', changing
+-- the list in a new migration. A test fails until both agree.
+create or replace function public.lift_allows_decimals(p_lift text)
+returns boolean language sql immutable set search_path = public as $$
+  -- The main lifts, then each extra exercise whose unit is 'kg' (none yet).
+  select coalesce(p_lift in ('squat','bench','deadlift'), false);
+$$;
+
 -- Apply the same basic validation to governed and direct admin writes.
 create or replace function public.validate_athlete_values()
 returns trigger language plpgsql set search_path = public as $$
-declare entry record;
+declare entry record; val numeric;
 begin
   new.name := btrim(new.name);
   if new.name is null or length(new.name) not between 1 and 80 then
@@ -131,8 +162,13 @@ begin
        or jsonb_typeof(entry.value) <> 'number' then
       raise exception 'invalid extra lift';
     end if;
-    if (entry.value::text)::numeric not between 0 and 99999 then
+    val := (entry.value::text)::numeric;
+    if val not between 0 and 99999 then
       raise exception 'lift values must be between 0 and 99999';
+    elsif val <> round(val) and not public.lift_allows_decimals(entry.key) then
+      raise exception 'repetitions and times must be whole numbers';
+    elsif val <> round(val, 1) then
+      raise exception 'weights may have at most one decimal';
     end if;
   end loop;
   if new.bench not between 0 and 99999 or new.squat not between 0 and 99999
@@ -190,12 +226,17 @@ begin
       raise exception 'invalid lift or value';
     end if;
     val := (p_payload->>'value')::numeric;
-    if val not between 0 and 99999 or val <> round(val, 1) then
-      raise exception 'lift values must be between 0 and 99999, with at most one decimal';
+    if val not between 0 and 99999 then
+      raise exception 'lift values must be between 0 and 99999';
+    elsif val <> round(val) and not public.lift_allows_decimals(p_payload->>'lift') then
+      raise exception 'repetitions and times must be whole numbers';
+    elsif val <> round(val, 1) then
+      raise exception 'weights may have at most one decimal';
     end if;
     select case p_payload->>'lift' when 'bench' then bench when 'squat' then squat
       when 'deadlift' then deadlift else coalesce((lifts->>(p_payload->>'lift'))::numeric, 0) end
       into old_val from public.athletes where id = p_athlete;
+    if val = old_val then raise exception 'no change: that value is already recorded'; end if;
     -- The base is server-owned; approval must not overwrite a newer verified change.
     p_payload := jsonb_build_object('lift', p_payload->>'lift', 'value', val, 'previous_value', old_val);
   elsif p_kind = 'achievement' then
@@ -304,8 +345,26 @@ begin
   update public.proposals set status='approved', decided_by=uid, decided_at=now() where id = p_id;
 end; $$;
 
+-- A member withdraws one of their own pending requests of any kind. It is recorded as
+-- the proposer rejecting it, so history keeps who closed it and when.
+create or replace function public.withdraw(p_id uuid)
+returns void language plpgsql security definer set search_path = public as $$
+declare uid uuid := auth.uid(); prof public.profiles; pr public.proposals;
+begin
+  if uid is null then raise exception 'not authenticated'; end if;
+  select * into prof from public.profiles where user_id = uid;
+  if not found then raise exception 'no profile'; end if;
+  if prof.status = 'blocked' then raise exception 'your account is blocked'; end if;
+  select * into pr from public.proposals where id = p_id and status = 'pending' for update;
+  if not found then raise exception 'proposal not found or already decided'; end if;
+  if pr.proposer <> uid then raise exception 'you can only withdraw your own requests'; end if;
+  update public.proposals set status='rejected', decided_by=uid, decided_at=now() where id = p_id;
+end; $$;
+
 create index if not exists proposals_pending_created on public.proposals(created_at) where status = 'pending';
 create index if not exists proposals_history_athlete on public.proposals(athlete_id, decided_at) where status = 'approved' and kind = 'pr';
+-- Public feed of recently verified PRs (approved PRs are already public through RLS).
+create index if not exists proposals_recent_prs on public.proposals (decided_at desc) where status = 'approved' and kind = 'pr';
 
 -- ───────────────────────────────────────────────────────────────────────────
 -- Realtime + seed
