@@ -1,6 +1,6 @@
 // Data + auth layer. Wraps Supabase so app.js never talks to it directly.
-// Governance lives in the database (RLS + propose()/decide() functions); this is
-// just a thin client over it. All methods are async and throw on error.
+// Governance lives in the database (RLS + propose()/decide()/withdraw() functions);
+// this is just a thin client over it. All methods are async and throw on error.
 
 (function () {
   const cfg = window.LEADERBOARD_CONFIG || {};
@@ -22,6 +22,21 @@
     connectionError = new Error('The connection library could not load. Check your connection and reload.');
   }
 
+  // Explicit columns: the live table also carries legacy fields the app never reads.
+  const ATHLETE_COLUMNS = 'id, name, bench, squat, deadlift, lifts, achievements, updated_at';
+  const PROFILE_COLUMNS = 'user_id, github_login, display_name, is_admin, status, athlete_id';
+  const PROPOSAL_COLUMNS = 'id, kind, approval, athlete_id, proposer, payload, status, created_at';
+
+  const connected = () => {
+    if (!client) throw new Error('Not connected to the leaderboard database.');
+    return client;
+  };
+  const rows = async (query) => {
+    const { data, error } = await query;
+    if (error) throw error;
+    return data;
+  };
+
   window.Store = {
     configured: !!client,
     connectionError,
@@ -41,8 +56,7 @@
     },
 
     async signIn() {
-      if (!client) return;
-      const { error } = await client.auth.signInWithOAuth({
+      const { error } = await connected().auth.signInWithOAuth({
         provider: 'github',
         options: { redirectTo: window.location.origin + window.location.pathname },
       });
@@ -67,87 +81,76 @@
     // --- reads --------------------------------------------------------------
     async listAthletes() {
       if (!client) return [];
-      const { data, error } = await client.from('athletes').select('*').order('name');
-      if (error) throw error;
-      return data;
+      return rows(client.from('athletes').select(ATHLETE_COLUMNS).order('name'));
     },
 
     // My own profile row (role/status/link). Null if signed out or not yet created.
     async myProfile(uid) {
-      if (!client) return null;
-      if (!uid) return null;
-      const { data: prof, error } = await client
-        .from('profiles').select('*').eq('user_id', uid).maybeSingle();
-      if (error) throw error;
-      return prof;
+      if (!client || !uid) return null;
+      return rows(client.from('profiles').select(PROFILE_COLUMNS).eq('user_id', uid).maybeSingle());
     },
 
     // Roster of all profiles (authenticated only) — for admin UI + owner mapping.
     async listProfiles() {
       if (!client) return [];
-      const { data, error } = await client.from('profiles').select('*');
-      if (error) throw error;
-      return data;
+      return rows(client.from('profiles').select(PROFILE_COLUMNS));
     },
 
     // Pending proposals (the review queue). Authenticated only.
     async listPendingProposals() {
       if (!client) return [];
-      const { data, error } = await client
-        .from('proposals').select('*').eq('status', 'pending').order('created_at');
-      if (error) throw error;
-      return data;
+      return rows(client.from('proposals').select(PROPOSAL_COLUMNS).eq('status', 'pending').order('created_at'));
+    },
+
+    // Latest verified PRs across the board, newest first. Public through RLS (0004).
+    async listRecentPrs(limit = 20) {
+      if (!client) return [];
+      return rows(client.from('proposals').select('id, athlete_id, payload, decided_at')
+        .eq('kind', 'pr').eq('status', 'approved')
+        .order('decided_at', { ascending: false }).limit(limit));
     },
 
     // An athlete's verified PR history (approved 'pr' proposals), oldest → newest.
-    // Approved PRs are publicly readable through RLS (migration 0004).
     async listAthleteHistory(athleteId) {
       if (!client) return [];
-      const { data, error } = await client
-        .from('proposals')
-        .select('payload, decided_at')
-        .eq('athlete_id', athleteId)
-        .eq('kind', 'pr')
-        .eq('status', 'approved')
-        .order('decided_at', { ascending: true });
-      if (error) throw error;
-      return data;
+      return rows(client.from('proposals').select('payload, decided_at')
+        .eq('athlete_id', athleteId).eq('kind', 'pr').eq('status', 'approved')
+        .order('decided_at', { ascending: true }));
     },
 
     // --- governed writes (RPCs enforce all the rules) -----------------------
     async propose(kind, athleteId, payload) {
-      const { data, error } = await client.rpc('propose', {
-        p_kind: kind, p_athlete: athleteId, p_payload: payload || {},
-      });
-      if (error) throw error;
-      return data;
+      return rows(connected().rpc('propose', { p_kind: kind, p_athlete: athleteId, p_payload: payload || {} }));
     },
 
     async decide(proposalId, approve) {
-      const { error } = await client.rpc('decide', { p_id: proposalId, p_approve: approve });
+      await rows(connected().rpc('decide', { p_id: proposalId, p_approve: approve }));
+    },
+
+    // The proposer retracts their own pending request (migration 0006).
+    async withdraw(proposalId) {
+      const { error } = await connected().rpc('withdraw', { p_id: proposalId });
+      if (error?.code === 'PGRST202') throw new Error('Withdrawing requests is not available yet. Ask an admin to reject it instead.');
       if (error) throw error;
     },
 
     // --- admin-only direct writes (RLS gates these to admins) ---------------
+    // Each selects the affected row, so an RLS-denied no-op cannot look successful.
     async adminUpdateProfile(userId, patch) {
-      const { error } = await client.from('profiles').update(patch).eq('user_id', userId).select('user_id').single();
-      if (error) throw error;
+      await rows(connected().from('profiles').update(patch).eq('user_id', userId).select('user_id').single());
     },
     async adminCreateAthlete(athlete) {
-      const { data, error } = await client.from('athletes').insert(athlete).select().single();
-      if (error) throw error;
-      return data;
+      return rows(connected().from('athletes').insert(athlete).select(ATHLETE_COLUMNS).single());
     },
     async adminUpdateAthlete(id, patch, expectedUpdatedAt) {
-      let query = client.from('athletes').update(patch).eq('id', id);
+      let query = connected().from('athletes').update(patch).eq('id', id);
       if (expectedUpdatedAt) query = query.eq('updated_at', expectedUpdatedAt);
       const { error } = await query.select('id').single();
       if (error?.code === 'PGRST116') throw new Error('This athlete changed or your access expired. Reopen the editor and try again.');
       if (error) throw error;
     },
     async adminDeleteAthlete(id) {
-      const { error } = await client.from('athletes').delete().eq('id', id).select('id').single();
-      if (error) throw error;
+      await rows(connected().from('athletes').delete().eq('id', id).select('id').single());
     },
 
     // --- realtime -----------------------------------------------------------

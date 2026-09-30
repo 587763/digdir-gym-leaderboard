@@ -3,6 +3,8 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <!-- Defense in depth: only our scripts, the pinned CDN library and Supabase APIs. -->
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://cdn.jsdelivr.net; style-src 'self' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self' https://*.supabase.co wss://*.supabase.co; object-src 'none'; base-uri 'self'; form-action 'self'">
   <meta name="description" content="A little friendly competition at the Digdir office gym. Personal records, peer-verified progress, and a whiteboard full of good lifts.">
   <title>Digdir Gym Leaderboard</title>
   <link rel="icon" type="image/svg+xml" href="favicon.svg">
@@ -10,11 +12,11 @@
   <meta name="theme-color" content="#fbfbf8">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Permanent+Marker&family=Caveat:wght@400;500;600;700&family=Indie+Flower&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="styles.css?v=3.0.1">
+  <link href="https://fonts.googleapis.com/css2?family=Permanent+Marker&family=Caveat:wght@400;600;700&family=Indie+Flower&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css?v=3.1.0">
 </head>
 <body>
-  <svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <svg class="svg-defs" width="0" height="0" aria-hidden="true">
     <defs>
       <filter id="roughen">
         <feTurbulence type="fractalNoise" baseFrequency="0.02" numOctaves="2" seed="7" result="noise"/>
@@ -37,51 +39,47 @@
           <p class="subtitle">Good lifts. Great company. A little friendly competition.</p>
         </div>
         <div class="header-actions">
-          <button id="tvModeBtn" class="btn btn-ghost tv-toggle" title="Big-screen / TV display — full screen, auto-cycles tabs">📺 TV mode</button>
+          <button type="button" id="tvModeBtn" class="btn btn-ghost tv-toggle" data-action="toggle-tv" title="Big-screen / TV display — full screen, auto-cycles tabs">📺 TV mode</button>
           <div id="authArea" class="auth-area"></div>
         </div>
       </div>
     </header>
 
     <div class="controls">
-      <button id="myAthleteBtn"     class="btn btn-primary own-only">🏋️ My PRs</button>
-      <button id="claimBtn"         class="btn btn-primary claim-only">🙋 Claim your spot</button>
-      <button id="reviewBtn"        class="btn btn-secondary review-only">📋 Review <span id="reviewCount" class="count-badge" hidden>0</span></button>
-      <button id="adminBtn"         class="btn btn-secondary admin-only">🛡️ Admin</button>
-      <button id="manageAthletesBtn" class="btn btn-secondary admin-only">👥 Athletes</button>
+      <button type="button" id="myAthleteBtn" class="btn btn-primary own-only" data-action="open-mine">🏋️ My PRs</button>
+      <button type="button" id="claimBtn" class="btn btn-primary claim-only" data-action="open-claim">🙋 Claim your spot</button>
+      <button type="button" id="reviewBtn" class="btn btn-secondary review-only" data-action="open-review">📋 Review <span id="reviewCount" class="count-badge" hidden>0</span></button>
+      <button type="button" id="adminBtn" class="btn btn-secondary admin-only" data-action="open-members">🛡️ Admin</button>
+      <button type="button" id="manageAthletesBtn" class="btn btn-secondary admin-only" data-action="open-athletes">👥 Athletes</button>
     </div>
 
     <div class="board-meta">
-      <div class="connection-status"><span id="boardStatus" role="status" data-state="idle">Opening the record book…</span><button id="retryBtn" class="btn btn-ghost" hidden>Try again</button></div>
+      <div class="connection-status"><span id="boardStatus" role="status" data-state="idle">Opening the record book…</span><button type="button" id="retryBtn" class="btn btn-ghost" data-action="retry" hidden>Try again</button></div>
       <span id="athleteCount"></span>
     </div>
 
     <div class="tab-navigation" role="tablist" aria-label="Leaderboards">
-      <button class="tab-btn active" data-tab="lifts" id="tab-lifts" role="tab" aria-controls="lifts-tab" aria-selected="true" tabindex="0">Main Lifts</button>
-      <button class="tab-btn" data-tab="total" id="tab-total" role="tab" aria-controls="total-tab" aria-selected="false" tabindex="-1">Total</button>
-      <button class="tab-btn" data-tab="other" id="tab-other" role="tab" aria-controls="other-tab" aria-selected="false" tabindex="-1">Other Lifts</button>
-      <button class="tab-btn" data-tab="cardio" id="tab-cardio" role="tab" aria-controls="cardio-tab" aria-selected="false" tabindex="-1">🏃 Cardio</button>
-      <button class="tab-btn" data-tab="fun" id="tab-fun" role="tab" aria-controls="fun-tab" aria-selected="false" tabindex="-1">🏆 Hall of Fame</button>
+      <button type="button" class="tab-btn active" data-tab="lifts" id="tab-lifts" role="tab" aria-controls="lifts-tab" aria-selected="true" tabindex="0"><span class="tab-icon" aria-hidden="true">🏋️</span>Main Lifts</button>
+      <button type="button" class="tab-btn" data-tab="total" id="tab-total" role="tab" aria-controls="total-tab" aria-selected="false" tabindex="-1"><span class="tab-icon" aria-hidden="true">🏆</span>Total</button>
+      <button type="button" class="tab-btn" data-tab="other" id="tab-other" role="tab" aria-controls="other-tab" aria-selected="false" tabindex="-1"><span class="tab-icon" aria-hidden="true">🤸</span>Other Lifts</button>
+      <button type="button" class="tab-btn" data-tab="cardio" id="tab-cardio" role="tab" aria-controls="cardio-tab" aria-selected="false" tabindex="-1"><span class="tab-icon" aria-hidden="true">🏃</span>Cardio</button>
+      <button type="button" class="tab-btn" data-tab="latest" id="tab-latest" role="tab" aria-controls="latest-tab" aria-selected="false" tabindex="-1"><span class="tab-icon" aria-hidden="true">🔥</span>Latest</button>
+      <button type="button" class="tab-btn" data-tab="fun" id="tab-fun" role="tab" aria-controls="fun-tab" aria-selected="false" tabindex="-1"><span class="tab-icon" aria-hidden="true">🏅</span>Hall of Fame</button>
     </div>
 
     <!-- Admin: direct add/edit athlete -->
-    <div id="athleteModal" class="modal">
+    <dialog id="athleteModal" class="modal" aria-labelledby="modalTitle">
       <div class="modal-content">
-        <button type="button" class="close" data-close="athleteModal" aria-label="Close dialog">&times;</button>
+        <button type="button" class="close" data-action="close-dialog" aria-label="Close dialog">&times;</button>
         <h2 id="modalTitle">Add athlete</h2>
         <form id="athleteForm">
           <div class="form-body">
             <div class="form-fields">
               <div class="form-group">
                 <label for="athleteName">Name</label>
-                <input type="text" maxlength="80" id="athleteName" required autocomplete="off">
+                <input type="text" maxlength="80" id="athleteName" required autocomplete="off" autofocus>
               </div>
-              <div class="form-row">
-                <div class="form-group"><label for="squat">🦵 Squat (kg)</label><input type="number" id="squat" step="0.1" min="0" max="99999" value="0"></div>
-                <div class="form-group"><label for="bench">🏋️ Bench (kg)</label><input type="number" id="bench" step="0.1" min="0" max="99999" value="0"></div>
-                <div class="form-group"><label for="deadlift">💀 Deadlift (kg)</label><input type="number" id="deadlift" step="0.1" min="0" max="99999" value="0"></div>
-              </div>
-              <div id="adminOtherLiftFields" class="form-row"></div>
+              <div id="adminLiftFields"></div>
               <h3 class="form-section-title">🏅 Achievements</h3>
               <div id="achievementFields" class="achievement-fields"></div>
             </div>
@@ -92,139 +90,126 @@
           </div>
           <div class="form-actions">
             <button type="submit" class="btn btn-primary">Save</button>
-            <button type="button" class="btn btn-secondary" data-close="athleteModal">Cancel</button>
+            <button type="button" class="btn btn-secondary" data-action="close-dialog">Cancel</button>
           </div>
         </form>
       </div>
-    </div>
+    </dialog>
 
     <!-- Admin: manage athletes list -->
-    <div id="manageModal" class="modal">
-      <div class="modal-content modal-large">
-        <button type="button" class="close" data-close="manageModal" aria-label="Close dialog">&times;</button>
-        <h2>Manage Athletes</h2>
-        <button id="addNewAthleteBtn" class="btn btn-primary" style="margin-bottom:20px;">+ Add New Athlete</button>
+    <dialog id="manageModal" class="modal" aria-labelledby="manageTitle">
+      <div class="modal-content modal-large" tabindex="-1" autofocus>
+        <button type="button" class="close" data-action="close-dialog" aria-label="Close dialog">&times;</button>
+        <h2 id="manageTitle">Manage Athletes</h2>
+        <div class="list-toolbar">
+          <button type="button" class="btn btn-primary" data-action="add-athlete">+ Add New Athlete</button>
+          <input type="search" id="athleteFilter" class="list-filter" placeholder="Find an athlete" aria-label="Find an athlete" autocomplete="off">
+        </div>
         <div id="athletesList" class="athletes-list"></div>
       </div>
-    </div>
+    </dialog>
 
     <!-- Claim your spot -->
-    <div id="claimModal" class="modal">
+    <dialog id="claimModal" class="modal" aria-labelledby="claimTitle">
       <div class="modal-content">
-        <button type="button" class="close" data-close="claimModal" aria-label="Close dialog">&times;</button>
-        <h2>🙋 Claim your spot</h2>
+        <button type="button" class="close" data-action="close-dialog" aria-label="Close dialog">&times;</button>
+        <h2 id="claimTitle">🙋 Claim your spot</h2>
         <p class="modal-intro">Link your GitHub account to your athlete. An admin approves it, then you can submit your PRs.</p>
-        <div class="form-group">
-          <label for="claimSelect">I am this athlete</label>
-          <select id="claimSelect" class="claim-select"></select>
-        </div>
-        <div class="form-divider-or">— or —</div>
-        <div class="form-group">
-          <label for="claimNewName">Add me as a new athlete</label>
-          <input type="text" maxlength="80" id="claimNewName" placeholder="Your name" autocomplete="off">
-        </div>
-        <div class="form-actions">
-          <button id="claimSubmit" class="btn btn-primary">Request</button>
-          <button class="btn btn-secondary" data-close="claimModal">Cancel</button>
-        </div>
+        <div id="claimPending" class="own-requests" hidden></div>
+        <form id="claimForm">
+          <div class="form-group">
+            <label for="claimSelect">I am this athlete</label>
+            <select id="claimSelect" class="claim-select" autofocus></select>
+          </div>
+          <div class="form-divider-or">— or —</div>
+          <div class="form-group">
+            <label for="claimNewName">Add me as a new athlete</label>
+            <input type="text" maxlength="80" id="claimNewName" placeholder="Your name" autocomplete="off">
+          </div>
+          <div class="form-actions">
+            <button type="submit" class="btn btn-primary">Request</button>
+            <button type="button" class="btn btn-secondary" data-action="close-dialog">Cancel</button>
+          </div>
+        </form>
       </div>
-    </div>
+    </dialog>
 
     <!-- My athlete: propose changes -->
-    <div id="mineModal" class="modal">
-      <div class="modal-content">
-        <button type="button" class="close" data-close="mineModal" aria-label="Close dialog">&times;</button>
-        <h2>🏋️ My PRs</h2>
-        <p class="modal-intro">PRs &amp; achievements need a peer to verify. Name changes need an admin. Unchanged fields are ignored.</p>
+    <dialog id="mineModal" class="modal" aria-labelledby="mineTitle">
+      <div class="modal-content" tabindex="-1" autofocus>
+        <button type="button" class="close" data-action="close-dialog" aria-label="Close dialog">&times;</button>
+        <h2 id="mineTitle">🏋️ My PRs</h2>
+        <p class="modal-intro">A peer verifies every PR and achievement. Name changes need an admin. Only changed fields are sent.</p>
+        <div id="minePending" class="own-requests" hidden></div>
         <form id="mineForm">
           <div class="form-group">
             <label for="mineName">Name <span class="tag tag-admin">admin approval</span></label>
             <input type="text" required maxlength="80" id="mineName" autocomplete="off">
           </div>
-          <div class="form-row">
-            <div class="form-group"><label for="mineSquat">🦵 Squat <span class="tag tag-peer">peer verify</span></label><input type="number" id="mineSquat" step="0.1" min="0" max="99999"></div>
-            <div class="form-group"><label for="mineBench">🏋️ Bench <span class="tag tag-peer">peer verify</span></label><input type="number" id="mineBench" step="0.1" min="0" max="99999"></div>
-            <div class="form-group"><label for="mineDeadlift">💀 Deadlift <span class="tag tag-peer">peer verify</span></label><input type="number" id="mineDeadlift" step="0.1" min="0" max="99999"></div>
-          </div>
-          <div id="mineOtherLiftFields" class="form-row"></div>
-          <h3 class="form-section-title">🏅 Achievements <span class="tag tag-peer">peer verify</span></h3>
+          <div id="mineLiftFields"></div>
+          <h3 class="form-section-title">🏅 Achievements</h3>
           <div id="mineAchievementFields" class="achievement-fields"></div>
           <div class="form-actions">
             <button type="submit" class="btn btn-primary">Submit changes</button>
-            <button type="button" class="btn btn-secondary" data-close="mineModal">Cancel</button>
+            <button type="button" class="btn btn-secondary" data-action="close-dialog">Cancel</button>
           </div>
         </form>
       </div>
-    </div>
+    </dialog>
 
     <!-- Review queue -->
-    <div id="reviewModal" class="modal">
-      <div class="modal-content modal-large">
-        <button type="button" class="close" data-close="reviewModal" aria-label="Close dialog">&times;</button>
-        <h2>📋 Pending changes</h2>
-        <p class="modal-intro">Verify peers' PRs &amp; achievements; admins also approve name changes, new athletes, and claims. Members verify one another; admins can also resolve their own requests.</p>
+    <dialog id="reviewModal" class="modal" aria-labelledby="reviewTitle">
+      <div class="modal-content modal-large" tabindex="-1" autofocus>
+        <button type="button" class="close" data-action="close-dialog" aria-label="Close dialog">&times;</button>
+        <h2 id="reviewTitle">📋 Pending changes</h2>
+        <p class="modal-intro">Members verify one another's PRs and achievements. Admins also approve name changes, new athletes and claims, and can resolve their own requests.</p>
         <div id="reviewList" class="review-list"></div>
       </div>
-    </div>
+    </dialog>
 
     <!-- Athlete progression / history -->
-    <div id="historyModal" class="modal">
-      <div class="modal-content modal-large">
-        <button type="button" class="close" data-close="historyModal" aria-label="Close dialog">&times;</button>
+    <dialog id="historyModal" class="modal" aria-labelledby="historyTitle">
+      <div class="modal-content modal-large" tabindex="-1" autofocus>
+        <button type="button" class="close" data-action="close-dialog" aria-label="Close dialog">&times;</button>
         <h2 id="historyTitle">📈 Progression</h2>
         <p class="modal-intro">Every peer-verified PR over time — direct admin edits are not included in this history.</p>
         <div id="historyBody" class="history-body"></div>
       </div>
-    </div>
+    </dialog>
 
     <!-- Admin: users -->
-    <div id="adminModal" class="modal">
-      <div class="modal-content modal-large">
-        <button type="button" class="close" data-close="adminModal" aria-label="Close dialog">&times;</button>
-        <h2>🛡️ Members</h2>
-        <p class="modal-intro">Approve, link to an athlete, or grant admin.</p>
+    <dialog id="adminModal" class="modal" aria-labelledby="adminTitle">
+      <div class="modal-content modal-large" tabindex="-1" autofocus>
+        <button type="button" class="close" data-action="close-dialog" aria-label="Close dialog">&times;</button>
+        <h2 id="adminTitle">🛡️ Members</h2>
+        <p class="modal-intro">Link members to their athlete, grant admin, or block an account. Pending members are listed first.</p>
         <div id="usersList" class="users-list"></div>
       </div>
-    </div>
+    </dialog>
 
-    <!-- Leaderboards -->
+    <!-- Leaderboards: sections are generated from the exercise registry (js/lifts.js) -->
     <div class="tab-content active" id="lifts-tab" role="tabpanel" aria-labelledby="tab-lifts" tabindex="-1">
-      <div class="leaderboards">
-        <div class="leaderboard-section" data-lift="squat">
-          <h2>🦵 Squat</h2>
-          <table class="leaderboard-table" id="squatTable"><thead><tr><th scope="col">Rank</th><th scope="col">Name</th><th scope="col">PR (kg)</th></tr></thead><tbody></tbody></table>
-        </div>
-        <div class="leaderboard-section" data-lift="bench">
-          <h2>🏋️ Bench Press</h2>
-          <table class="leaderboard-table" id="benchTable"><thead><tr><th scope="col">Rank</th><th scope="col">Name</th><th scope="col">PR (kg)</th></tr></thead><tbody></tbody></table>
-        </div>
-        <div class="leaderboard-section" data-lift="deadlift">
-          <h2>💀 Deadlift</h2>
-          <table class="leaderboard-table" id="deadliftTable"><thead><tr><th scope="col">Rank</th><th scope="col">Name</th><th scope="col">PR (kg)</th></tr></thead><tbody></tbody></table>
-        </div>
-      </div>
+      <div class="leaderboards" data-board-group="main"></div>
       <p class="hint">Every lift counts. Tap a name to see their story.</p>
     </div>
 
     <div class="tab-content" id="total-tab" role="tabpanel" aria-labelledby="tab-total" tabindex="-1">
-      <div class="leaderboards">
-        <div class="leaderboard-section leaderboard-total" data-lift="total">
-          <h2>🏆 Total (Combined)</h2>
-          <table class="leaderboard-table" id="totalTable"><thead><tr><th scope="col">Rank</th><th scope="col">Name</th><th scope="col">Total (kg)</th></tr></thead><tbody></tbody></table>
-        </div>
-      </div>
+      <div class="leaderboards" data-board-group="total"></div>
     </div>
 
-    <!-- Other lifts: sections built dynamically from js/lifts.js -->
     <div class="tab-content" id="other-tab" role="tabpanel" aria-labelledby="tab-other" tabindex="-1">
-      <div class="leaderboards" id="otherLiftsBoards"></div>
+      <div class="leaderboards" data-board-group="other"></div>
       <p class="hint">Every lift counts. Tap a name to see their story.</p>
     </div>
 
-    <!-- Cardio: sections built dynamically from js/lifts.js (group: 'cardio') -->
     <div class="tab-content" id="cardio-tab" role="tabpanel" aria-labelledby="tab-cardio" tabindex="-1">
-      <div class="leaderboards" id="cardioBoards"></div>
+      <div class="leaderboards" data-board-group="cardio"></div>
       <p class="hint">Fast feet, friendly rivals. Tap a name to see their progress.</p>
+    </div>
+
+    <div class="tab-content" id="latest-tab" role="tabpanel" aria-labelledby="tab-latest" tabindex="-1">
+      <div class="leaderboards" data-board-group="latest"></div>
+      <p class="hint">Fresh from the gym floor. Every PR here was witnessed by a peer.</p>
     </div>
 
     <div class="tab-content" id="fun-tab" role="tabpanel" aria-labelledby="tab-fun" tabindex="-1">
@@ -236,12 +221,15 @@
     src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.107.0/dist/umd/supabase.js"
     integrity="sha384-CQbEv3UOeYwlaBLdPF5KqEagCP39Q1KpvJC6Gwa3UGjZAwMvpA+0TFxSSnrgb4MX"
     crossorigin="anonymous"></script>
-  <script src="js/config.js?v=3.0.1"></script>
-  <script src="js/achievements.js?v=3.0.1"></script>
-  <script src="js/lifts.js?v=3.0.1"></script>
-  <script src="js/avatar.js?v=3.0.1"></script>
-  <script src="js/store.js?v=3.0.1"></script>
-  <script src="js/history.js?v=3.0.1"></script>
-  <script src="js/app.js?v=3.0.1"></script>
+  <script src="js/config.js?v=3.1.0"></script>
+  <script src="js/ui.js?v=3.1.0"></script>
+  <script src="js/achievements.js?v=3.1.0"></script>
+  <script src="js/lifts.js?v=3.1.0"></script>
+  <script src="js/avatar.js?v=3.1.0"></script>
+  <script src="js/store.js?v=3.1.0"></script>
+  <script src="js/history.js?v=3.1.0"></script>
+  <script src="js/board.js?v=3.1.0"></script>
+  <script src="js/tv.js?v=3.1.0"></script>
+  <script src="js/app.js?v=3.1.0"></script>
 </body>
 </html>
