@@ -1,11 +1,12 @@
 {
   "name": "digdir-gym-leaderboard",
-  "version": "3.0.0",
+  "version": "3.1.0",
   "description": "Static gym leaderboard (squat/bench/deadlift PRs) backed by Supabase. No build step.",
   "private": true,
   "scripts": {
     "dev": "node scripts/dev-server.mjs",
-    "test": "node --test tests/*.test.mjs"
+    "test": "node --test tests/*.test.mjs",
+    "test:browser": "node scripts/browser-check.mjs"
   },
   "license": "MIT",
   "devDependencies": {

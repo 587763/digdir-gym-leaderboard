@@ -7,7 +7,7 @@ const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const port = Number(process.env.PORT || 3000);
 const types = {'.html':'text/html','.js':'text/javascript','.css':'text/css','.svg':'image/svg+xml','.png':'image/png'};
 const publicFiles = new Set(['index.html','styles.css','favicon.svg','apple-touch-icon.png']);
-const scriptFiles = new Set(['config','achievements','lifts','avatar','store','history','app'].map((name)=>`js/${name}.js`));
+const scriptFiles = new Set(['config','ui','achievements','lifts','avatar','store','history','board','tv','app'].map((name)=>`js/${name}.js`));
 
 createServer(async (req,res)=>{
   try {

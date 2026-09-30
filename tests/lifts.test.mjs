@@ -1,13 +1,14 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { environment, athlete } from './helpers.mjs';
-const { Lifts, parseLiftTime, formatLiftTime, HistoryView } = environment();
+const { Lifts, HistoryView } = environment();
+const { parseTime: parseLiftTime, formatTime: formatLiftTime } = Lifts;
 
 test('time parsing rejects ambiguous or malformed records', () => {
-  for (const bad of ['6:99', '6:3', '6:30oops', '12abc', '-5', 'Infinity', '1.2', '1:30.5']) {
+  for (const bad of ['6:99', '6:3', '6:30oops', '12abc', '-5', 'Infinity', '1.2', '1:30.5', '6.99', '1,5']) {
     assert.ok(Number.isNaN(parseLiftTime(bad)), bad);
   }
-  for (const [input, seconds] of [['6:30', 390], ['390', 390], [' 0:08 ', 8], ['', 0], ['00:00', 0]]) {
+  for (const [input, seconds] of [['6:30', 390], ['6.30', 390], ['6,30', 390], ['390', 390], [' 0:08 ', 8], ['', 0], ['00:00', 0]]) {
     assert.equal(parseLiftTime(input), seconds);
     assert.equal(parseLiftTime(formatLiftTime(seconds)), seconds);
   }
@@ -41,16 +42,44 @@ test('equal decimal totals share a rank despite different floating-point sums', 
     [['A',300.6,1],['B',300.6,1],['C',300,3]]);
 });
 test('history escapes unknown labels and ignores invalid points', () => {
-  const html = HistoryView.render([
+  const html = String(HistoryView.render([
     {payload:{lift:'<img src=x onerror=alert(1)>',value:10},decided_at:'2026-01-01'},
     {payload:{lift:'bench',value:'broken'},decided_at:'2026-01-02'},
-  ]);
+  ]));
   assert.ok(html.includes('&lt;img'));
   assert.ok(!html.includes('<img'));
   assert.ok(!html.includes('NaN'));
 });
 test('history plots elapsed time, including repeated timestamps', () => {
   const series = [{value:10,at:'2026-01-01'}, {value:15,at:'2026-01-02'}, {value:20,at:'2026-01-11'}];
-  assert.match(HistoryView.sparkline('bench', series), /cx="41.6"/);
-  assert.ok(!HistoryView.sparkline('bench', series.map((p) => ({...p,at:'2026-01-01'}))).includes('NaN'));
+  assert.match(String(HistoryView.sparkline('bench', series)), /cx="41.6"/);
+  assert.ok(!String(HistoryView.sparkline('bench', series.map((p) => ({...p,at:'2026-01-01'})))).includes('NaN'));
+});
+test('history notes cleared entries instead of plotting them as results', () => {
+  const html = String(HistoryView.render([
+    {payload:{lift:'run1k',value:390},decided_at:'2026-01-01'},
+    {payload:{lift:'run1k',value:0},decided_at:'2026-02-01'},
+  ]));
+  assert.match(html, /first PR/);
+  assert.match(html, /Entry cleared on/);
+  assert.ok(!html.includes('0:00'));
+});
+test('history charts put the better result higher, including faster times', () => {
+  const ys = (lift, values) => [...String(HistoryView.sparkline(lift, values.map((value, i) => ({value, at:`2026-0${i + 1}-01`})))).matchAll(/cy="([\d.]+)"/g)].map((m) => Number(m[1]));
+  const [slow, fast] = ys('run1k', [400, 300]);
+  assert.ok(fast < slow, 'a faster time is plotted higher');
+  const [light, heavy] = ys('bench', [100, 120]);
+  assert.ok(heavy < light);
+});
+test('history explains when the board differs from the last verified value', () => {
+  const html = String(HistoryView.render([{payload:{lift:'bench',value:100},decided_at:'2026-01-01'}], athlete('A',{bench:105})));
+  assert.match(html, /On the board now: 105\.0 kg \(set by an admin\)/);
+});
+test('improvements respect the direction of each exercise', () => {
+  assert.equal(Lifts.improves('bench', 100, 110), true);
+  assert.equal(Lifts.improves('bench', 110, 100), false);
+  assert.equal(Lifts.improves('run1k', 300, 290), true);
+  assert.equal(Lifts.improves('run1k', 0, 290), true);
+  assert.equal(Lifts.improves('run1k', 300, 0), false);
+  assert.equal(Lifts.formatDelta('run1k', -8), '−0:08');
 });
