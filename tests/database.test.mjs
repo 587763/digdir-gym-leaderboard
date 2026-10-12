@@ -6,7 +6,8 @@ import { read, environment } from './helpers.mjs';
 let db;
 const ids = Object.fromEntries(['admin','member','peer','pending','blocked','missing','deputy','newcomer','reviewer'].map((key,i)=>[key,`00000000-0000-4000-8000-${String(i+1).padStart(12,'0')}`]));
 const governance='supabase/migrations/0005_governance_hardening.sql', safeguards='supabase/migrations/0006_member_safeguards.sql',
-  archiving='supabase/migrations/0007_archive_athletes.sql', bodyweights='supabase/migrations/0008_bodyweight.sql';
+  archiving='supabase/migrations/0007_archive_athletes.sql', bodyweights='supabase/migrations/0008_bodyweight.sql',
+  curls='supabase/migrations/0009_strict_curl.sql';
 let athletes, freshCatalog;
 async function as(user) {
   await db.exec('reset role');
@@ -56,7 +57,7 @@ async function catalog(pg) {
 const fresh=()=>freshCatalog??=database().then(async(pg)=>{try{return await catalog(pg);}finally{await pg.close();}});
 before(async()=>{
   db = await database();
-  for(const file of [governance,governance,safeguards,safeguards,archiving,archiving,bodyweights,bodyweights]) await db.exec(read(file));
+  for(const file of [governance,governance,safeguards,safeguards,archiving,archiving,bodyweights,bodyweights,curls,curls]) await db.exec(read(file));
   await db.exec('grant usage on schema public,auth to authenticated,anon; grant select,insert,update,delete on all tables in schema public to authenticated; grant select on all tables in schema public to anon;');
   for(const [name,id] of Object.entries(ids)) {
     if(name==='missing') continue;
@@ -479,8 +480,8 @@ test('fresh schema and migration use identical governance functions',()=>{
   const extract=(sql,name)=>{const start=sql.indexOf(`create or replace function public.${name}(`);assert.ok(start>=0,name);return sql.slice(start,sql.indexOf('$$;',start)+3);};
   // Each function is compared with the migration that last defines it.
   for(const [file,names] of [[governance,['handle_new_user','is_admin']],
-    [safeguards,['lift_allows_decimals','validate_athlete_values','protect_last_admin']],
-    [archiving,['propose','decide','withdraw','restore_my_athlete']],[bodyweights,['set_my_bodyweight']]]) {
+    [safeguards,['validate_athlete_values','protect_last_admin']],
+    [archiving,['propose','decide','withdraw','restore_my_athlete']],[bodyweights,['set_my_bodyweight']],[curls,['lift_allows_decimals']]]) {
     for(const name of names) assert.equal(extract(read('supabase/schema.sql'),name),extract(read(file),name),`${file}: ${name}`);
   }
 });
@@ -558,7 +559,20 @@ test('upgrading 0007 to 0008 preserves rows and matches the fresh schema',async(
   // Nobody is on the bodyweight boards until they share it, and nothing else changes.
   assert.ok(upgraded.every((row)=>row.bodyweight===null));
   assert.deepEqual([upgraded.map(({bodyweight,...row})=>row),...others],before);
-  assert.deepEqual(await catalog(db),await fresh());
   await as('member'); await setBodyweight(80);
   assert.equal(Number((await stored('select bodyweight from athletes where id=$1',[athletes[0].id]))[0].bodyweight),80);
+});
+test('upgrading 0008 to 0009 gives strict curls one decimal and matches the fresh schema',async()=>{
+  // Continues from the 0008 database the previous test upgraded: curls are whole numbers there.
+  await as('member');
+  await assert.rejects(()=>propose('pr',athletes[0].id,{lift:'strictcurl',value:42.5}),/whole numbers/);
+  await db.exec('reset role');
+  const before=await allRows();
+  await db.exec(read(curls));
+  await db.exec(read(curls));
+  assert.deepEqual(await allRows(),before);
+  assert.deepEqual(await catalog(db),await fresh());
+  await as('member');
+  await assert.rejects(()=>propose('pr',athletes[0].id,{lift:'strictcurl',value:42.55}),/one decimal/);
+  await withdraw(await propose('pr',athletes[0].id,{lift:'strictcurl',value:42.5}));
 });

@@ -179,7 +179,8 @@ body.is-admin   .admin-only  { display: inline-flex; }
   grid-template-columns: repeat(auto-fit, minmax(min(100%, 320px), 1fr));
   align-items: start;
 }
-#lifts-tab .leaderboards, #other-tab .leaderboards { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+#lifts-tab .leaderboards { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+#other-tab .leaderboards { grid-template-columns: repeat(2, minmax(0, 1fr)); } /* four boards, two by two */
 #total-tab .leaderboard-section, #cardio-tab .leaderboard-section, #latest-tab .leaderboard-section { width: 100%; max-width: 820px; margin: 0 auto; }
 .leaderboard-section {
   min-width: 0; background: rgba(255,255,255,.85); border: 2px solid var(--ink);
@@ -562,10 +563,20 @@ html.tv-mode, .tv-mode body { height: 100vh; overflow: hidden; }
 
 /* Main lifts: three equal columns, each board with its own podium. */
 .tv-mode #lifts-tab .leaderboards { grid-template-columns: repeat(3, 1fr); gap: 28px; }
-/* Other lifts + Cardio: centered, capped width so a lone lift doesn't sprawl; several tile. */
-.tv-mode #other-tab .leaderboards { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 28px; }
+/* Other lifts: every board in one row, since paging needs that. Four boards share the width,
+   so below ~1565px wide, where the 18px root minimum would crowd them, the lettering and
+   columns shrink with the screen (min(1rem, 1.15vw) is the root size without that minimum). */
+.tv-mode #other-tab { --tv-scale: min(1rem, 1.15vw); }
+.tv-mode #other-tab .leaderboards { grid-template-columns: none; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); gap: 20px; }
+.tv-mode #other-tab .leaderboard-section h2 { font-size: calc(1.6 * var(--tv-scale)); }
+.tv-mode #other-tab .athlete-name { font-size: calc(1.5 * var(--tv-scale)); }
+.tv-mode #other-tab .pr-value { font-size: calc(1.7 * var(--tv-scale)); }
+.tv-mode #other-tab .podium-name { font-size: calc(1.45 * var(--tv-scale)); }
+.tv-mode #other-tab .podium-value { font-size: calc(1.15 * var(--tv-scale)); }
+.tv-mode #other-tab .leaderboard-table th:first-child { width: calc(3.5 * var(--tv-scale)); }
+.tv-mode #other-tab .leaderboard-table th:last-child { width: calc(7 * var(--tv-scale)); }
+/* Cardio: centered, capped width so a lone board doesn't sprawl; several tile. */
 .tv-mode #cardio-tab .leaderboards { display: flex; justify-content: center; gap: 28px; }
-.tv-mode #other-tab .leaderboard-section,
 .tv-mode #cardio-tab .leaderboard-section { flex: 1 1 420px; max-width: 760px; }
 /* Total: prominent podium + a big centered table (don't stretch one column wide). */
 .tv-mode #total-tab .leaderboards { display: block; }

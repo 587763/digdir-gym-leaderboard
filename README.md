@@ -2,7 +2,7 @@
 
 A digital version of our office gym whiteboard — squat / bench / deadlift personal
 records, a combined total, podiums, "other lifts" (a timed dead hang, push-up & pull-up
-counts), a Cardio tab (e.g. a fastest 1 km), optional bodyweight rankings, a feed of the
+counts, a strict curl), a Cardio tab (e.g. a fastest 1 km), optional bodyweight rankings, a feed of the
 latest verified PRs, per-athlete progression charts, and a Hall of Fame for fun
 achievements. Hand-drawn whiteboard look; the board updates live across everyone's screens.
 

@@ -147,8 +147,8 @@ create policy "approved PRs are public history" on public.proposals for select u
 -- the list in a new migration. A test fails until both agree.
 create or replace function public.lift_allows_decimals(p_lift text)
 returns boolean language sql immutable set search_path = public as $$
-  -- The main lifts, then each extra exercise whose unit is 'kg' (none yet).
-  select coalesce(p_lift in ('squat','bench','deadlift'), false);
+  -- The main lifts, then each extra exercise whose unit is 'kg'.
+  select coalesce(p_lift in ('squat','bench','deadlift','strictcurl'), false);
 $$;
 
 -- Apply the same basic validation to governed and direct admin writes.

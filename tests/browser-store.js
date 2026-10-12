@@ -4,7 +4,7 @@
   const names = ['Alex','Daniel','Hallvard','Jens','Solveig','An exceptionally long athlete name that needs to wrap'];
   let athletes = fixture === 'empty' ? [] : Array.from({length:fixture==='large'?65:6},(_,i)=>({
     id:`athlete-${i}`,name:names[i] || `Athlete ${i + 1}`,bench:140-i,squat:160-i,deadlift:180-i,
-    lifts:{deadhang:90+i,pullups:12,run1k:240+i},achievements:['gripper90kg'],
+    lifts:{deadhang:90+i,pullups:12,run1k:240+i,strictcurl:55-i/2},achievements:['gripper90kg'],
     // Every third athlete keeps their bodyweight to themselves (off the ⚖️ boards).
     bodyweight:i % 3 === 2 ? null : 72 + (i * 7) % 40,
     updated_at:'2026-09-01T08:00:00Z',
@@ -12,7 +12,7 @@
   if (fixture === 'layout') athletes = athletes.map((a, i) => ({
     ...a, name: i < 3 ? `${'Longathletename'.repeat(4)} ${i + 1}` : a.name,
     bench: 99999 - i / 10, squat: 99999 - i / 10, deadlift: 99999 - i / 10, bodyweight: 30 + i / 10,
-    lifts: {deadhang:99999 - i, pullups:99999 - i, pushups:99999 - i, run1k:99999 - i},
+    lifts: {deadhang:99999 - i, pullups:99999 - i, pushups:99999 - i, run1k:99999 - i, strictcurl:99999 - i / 10},
   }));
   // An archived athlete: off the boards, records and verified history kept.
   if (fixture !== 'empty') athletes.push({id:'athlete-archived',name:'Rita Retired',bench:95,squat:120,deadlift:140,

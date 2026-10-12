@@ -13,13 +13,14 @@
 // A new extra exercise with unit 'kg' must also be listed in the SQL function
 // public.lift_allows_decimals(); tests/database.test.mjs checks the two agree.
 window.EXERCISES = [
-  { id: 'squat',    emoji: '🦵', label: 'Squat',        unit: 'kg',   group: 'main' },
-  { id: 'bench',    emoji: '🏋️', label: 'Bench Press',  unit: 'kg',   group: 'main' },
-  { id: 'deadlift', emoji: '💀', label: 'Deadlift',     unit: 'kg',   group: 'main' },
-  { id: 'deadhang', emoji: '🐒', label: 'Dead Hang',    unit: 'time', group: 'other' },
-  { id: 'pullups',  emoji: '🧗', label: 'Chill-ups',    unit: 'reps', group: 'other' },
-  { id: 'pushups',  emoji: '💪', label: 'Push-ups',     unit: 'reps', group: 'other' },
-  { id: 'run1k',    emoji: '🏃', label: 'Fastest 1 km', unit: 'time', group: 'cardio', lowerIsBetter: true },
+  { id: 'squat',      emoji: '🦵', label: 'Squat',        unit: 'kg',   group: 'main' },
+  { id: 'bench',      emoji: '🏋️', label: 'Bench Press',  unit: 'kg',   group: 'main' },
+  { id: 'deadlift',   emoji: '💀', label: 'Deadlift',     unit: 'kg',   group: 'main' },
+  { id: 'deadhang',   emoji: '🐒', label: 'Dead Hang',    unit: 'time', group: 'other' },
+  { id: 'pullups',    emoji: '🧗', label: 'Chill-ups',    unit: 'reps', group: 'other' },
+  { id: 'pushups',    emoji: '💪', label: 'Push-ups',     unit: 'reps', group: 'other' },
+  { id: 'strictcurl', emoji: '🦾', label: 'Strict Curl',  unit: 'kg',   group: 'other' },
+  { id: 'run1k',      emoji: '🏃', label: 'Fastest 1 km', unit: 'time', group: 'cardio', lowerIsBetter: true },
 ];
 
 // Shared domain rules for boards, forms and history. No DOM or database access.
