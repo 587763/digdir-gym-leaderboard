@@ -6,6 +6,15 @@
 // tests/changelog.test.mjs keeps the top entry in step with the app version.
 window.CHANGELOG = [
   {
+    version: '3.5.0',
+    date: '2026-10-12',
+    changes: [
+      '🦾 Strict Curl joins Other Lifts: your heaviest strict curl with a bar, in kilograms.',
+      'With ⚖️ Bodyweight ranking on, it is divided by bodyweight like the main lifts.',
+      'Other Lifts shows its boards two by two, and the TV shows all four side by side.',
+    ],
+  },
+  {
     version: '3.4.0',
     date: '2026-10-12',
     changes: [

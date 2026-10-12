@@ -81,7 +81,8 @@ Live: https://587763.github.io/digdir-gym-leaderboard/ · Origin: `587763/digdir
   0003 extra lifts; 0004 public history; 0005 validation and decision hardening; 0006 member
   safeguards (withdraw, last admin, unit validation, reviewer FK, recent-PR index); 0007
   archived athletes (`archived_at`, `restore_my_athlete()`, archive-aware propose/decide);
-  0008 opt-in bodyweight (`athletes.bodyweight` with a 30–300 check, `set_my_bodyweight()`).
+  0008 opt-in bodyweight (`athletes.bodyweight` with a 30–300 check, `set_my_bodyweight()`);
+  0009 strict curl (`strictcurl` takes one decimal in `lift_allows_decimals()`).
 - `scripts/dev-server.mjs`: Node static allowlist server, no caching, localhost only. Does not
   serve `.env`, `.git`, SQL or arbitrary workspace files. `PORT` overrides 3000.
 - `scripts/browser-check.mjs`: zero-dependency layout checks in local Chrome over the DevTools
@@ -181,6 +182,11 @@ still advances. A PR verified while the board is open gets a celebration banner.
   `TvDisplay.PAGE_PAD` reserves 48px for the dots.
 - Refits after render, tab switches, fonts loading and resize; changing page counts restarts
   the rotation clock so late data does not leave a stale countdown.
+- `fit()` pages rows within one row of boards, so a tab's boards must sit side by side on TV.
+  Other Lifts has four: its TV grid puts every board in one column of its own, and below
+  ~1565px wide (where the root's 18px minimum applies) its lettering and columns scale with
+  `--tv-scale` (`min(1rem, 1.15vw)`) so 720p keeps names whole. A fifth board in one tab
+  needs a new TV layout (or paging through rows of boards).
 - Connection warnings and Retry remain visible in the TV footer reserve.
 
 ## Extending
@@ -199,9 +205,10 @@ still advances. A PR verified while the board is open gets a celebration banner.
 
 ## Database upgrades and deployment
 Apply migrations in order through the Supabase SQL Editor before deploying the frontend that
-needs them; production has 0002–0008 (0001 was superseded; 0008 applied 12 October 2026).
+needs them; production has 0002–0009 (0001 was superseded; 0008 and 0009 applied 12 October 2026).
 The frontend selects `athletes.archived_at` (since 3.2, 0007) and `athletes.bodyweight` (since
-3.3, 0008), so it cannot load boards on a database without them. Migrations are
+3.3, 0008), so it cannot load boards on a database without them; without 0009, strict curls
+accept only whole kilograms. Migrations are
 transactional and idempotent and rewrite no rows; 0006 stops with a named athlete if a
 stored value breaks its unit. Tests execute migrations in local Postgres (PGlite). Check the
 backup workflow ran recently before applying one (see Backups).
