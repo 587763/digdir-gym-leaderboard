@@ -13,7 +13,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Permanent+Marker&family=Caveat:wght@400;600;700&family=Indie+Flower&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="styles.css?v=3.3.0">
+  <link rel="stylesheet" href="styles.css?v=3.4.0">
 </head>
 <body>
   <svg class="svg-defs" width="0" height="0" aria-hidden="true">
@@ -39,7 +39,7 @@
           <p class="subtitle">Good lifts. Great company. A little friendly competition.</p>
         </div>
         <div class="header-actions">
-          <button type="button" id="bodyweightBtn" class="btn btn-ghost bodyweight-toggle" data-action="toggle-bodyweight" aria-pressed="false" title="Also rank kilograms lifted per kilogram of bodyweight, for athletes who share theirs">⚖️ Bodyweight ranking</button>
+          <button type="button" id="bodyweightBtn" class="btn btn-ghost bodyweight-toggle" data-action="toggle-bodyweight" aria-pressed="false" title="Rank the boards by bodyweight instead of weight lifted, for athletes who share theirs">⚖️ Bodyweight ranking</button>
           <button type="button" id="tvModeBtn" class="btn btn-ghost tv-toggle" data-action="toggle-tv" title="Big-screen / TV display — full screen, auto-cycles tabs">📺 TV mode</button>
           <div id="authArea" class="auth-area"></div>
         </div>
@@ -68,12 +68,12 @@
     <div class="tab-navigation" role="tablist" aria-label="Leaderboards">
       <button type="button" class="tab-btn active" data-tab="lifts" id="tab-lifts" role="tab" aria-controls="lifts-tab" aria-selected="true" tabindex="0"><span class="tab-icon" aria-hidden="true">🏋️</span>Main Lifts</button>
       <button type="button" class="tab-btn" data-tab="total" id="tab-total" role="tab" aria-controls="total-tab" aria-selected="false" tabindex="-1"><span class="tab-icon" aria-hidden="true">🏆</span>Total</button>
-      <button type="button" class="tab-btn" data-tab="bodyweight" id="tab-bodyweight" role="tab" aria-controls="bodyweight-tab" aria-selected="false" tabindex="-1" hidden><span class="tab-icon" aria-hidden="true">⚖️</span>Bodyweight</button>
       <button type="button" class="tab-btn" data-tab="other" id="tab-other" role="tab" aria-controls="other-tab" aria-selected="false" tabindex="-1"><span class="tab-icon" aria-hidden="true">🤸</span>Other Lifts</button>
       <button type="button" class="tab-btn" data-tab="cardio" id="tab-cardio" role="tab" aria-controls="cardio-tab" aria-selected="false" tabindex="-1"><span class="tab-icon" aria-hidden="true">🏃</span>Cardio</button>
       <button type="button" class="tab-btn" data-tab="latest" id="tab-latest" role="tab" aria-controls="latest-tab" aria-selected="false" tabindex="-1"><span class="tab-icon" aria-hidden="true">🔥</span>Latest</button>
       <button type="button" class="tab-btn" data-tab="fun" id="tab-fun" role="tab" aria-controls="fun-tab" aria-selected="false" tabindex="-1"><span class="tab-icon" aria-hidden="true">🏅</span>Hall of Fame</button>
     </div>
+    <p id="bodyweightNote" class="mode-note" hidden><strong>⚖️ Ranked by bodyweight.</strong> Lifts are divided by bodyweight. Reps and hang times are multiplied by it, since there your body is the weight. Cardio stays as it is. Only athletes who share their bodyweight in My PRs are ranked.</p>
 
     <!-- Admin: direct add/edit athlete -->
     <dialog id="athleteModal" class="modal" aria-labelledby="modalTitle">
@@ -217,12 +217,6 @@
       <div class="leaderboards" data-board-group="total"></div>
     </div>
 
-    <!-- Opt-in for each viewer (⚖️ Bodyweight ranking); a TV only rotates here when it is on -->
-    <div class="tab-content" id="bodyweight-tab" role="tabpanel" aria-labelledby="tab-bodyweight" tabindex="-1">
-      <div class="leaderboards" data-board-group="bodyweight"></div>
-      <p class="hint">Kilograms lifted per kilogram of bodyweight. Only athletes who share their bodyweight in My PRs are ranked here.</p>
-    </div>
-
     <div class="tab-content" id="other-tab" role="tabpanel" aria-labelledby="tab-other" tabindex="-1">
       <div class="leaderboards" data-board-group="other"></div>
       <p class="hint">Every lift counts. Tap a name to see their story.</p>
@@ -247,16 +241,16 @@
     src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.107.0/dist/umd/supabase.js"
     integrity="sha384-CQbEv3UOeYwlaBLdPF5KqEagCP39Q1KpvJC6Gwa3UGjZAwMvpA+0TFxSSnrgb4MX"
     crossorigin="anonymous"></script>
-  <script src="js/config.js?v=3.3.0"></script>
-  <script src="js/ui.js?v=3.3.0"></script>
-  <script src="js/achievements.js?v=3.3.0"></script>
-  <script src="js/changelog.js?v=3.3.0"></script>
-  <script src="js/lifts.js?v=3.3.0"></script>
-  <script src="js/avatar.js?v=3.3.0"></script>
-  <script src="js/store.js?v=3.3.0"></script>
-  <script src="js/history.js?v=3.3.0"></script>
-  <script src="js/board.js?v=3.3.0"></script>
-  <script src="js/tv.js?v=3.3.0"></script>
-  <script src="js/app.js?v=3.3.0"></script>
+  <script src="js/config.js?v=3.4.0"></script>
+  <script src="js/ui.js?v=3.4.0"></script>
+  <script src="js/achievements.js?v=3.4.0"></script>
+  <script src="js/changelog.js?v=3.4.0"></script>
+  <script src="js/lifts.js?v=3.4.0"></script>
+  <script src="js/avatar.js?v=3.4.0"></script>
+  <script src="js/store.js?v=3.4.0"></script>
+  <script src="js/history.js?v=3.4.0"></script>
+  <script src="js/board.js?v=3.4.0"></script>
+  <script src="js/tv.js?v=3.4.0"></script>
+  <script src="js/app.js?v=3.4.0"></script>
 </body>
 </html>

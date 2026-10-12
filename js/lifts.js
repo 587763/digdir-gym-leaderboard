@@ -7,6 +7,8 @@
 //           'time' whole seconds, shown and entered as m:ss; longer ranks higher
 //                  unless lowerIsBetter (e.g. a run), which ranks faster first
 //   group   tab: 'main' (fixed columns: adding one needs a migration), 'other' or 'cardio'
+//   bodyweight: false   leaves a reps or time exercise unadjusted by ⚖️ Bodyweight ranking
+//           when the body is not the weight moved (races are never adjusted)
 //
 // A new extra exercise with unit 'kg' must also be listed in the SQL function
 // public.lift_allows_decimals(); tests/database.test.mjs checks the two agree.
@@ -27,14 +29,20 @@ window.Lifts = (() => {
   const main = all.filter((e) => e.group === 'main').map((e) => e.id);
   const extra = all.filter((e) => e.group !== 'main');
   const TOTAL = { id: 'total', emoji: '🏆', label: 'Total', unit: 'kg', group: 'total' };
-  // Opt-in ⚖️ Bodyweight boards: each main lift and the total again, ranked by kilograms
-  // lifted per kilogram of shared bodyweight. Never stored, and the '-' in their ids keeps
-  // them apart from stored exercise keys. Bodyweight is kg with one decimal, within BODYWEIGHT.
+  // ⚖️ Bodyweight ranking (each viewer opts in) swaps each board for a version adjusted by the
+  // athlete's shared bodyweight. Weights lifted are divided by it ('bw-ratio': 1.52× is 1.52
+  // times bodyweight). In bodyweight exercises the body is the weight, so their reps and
+  // hold times are multiplied by it instead ('bw-reps': kilograms moved; 'bw-time': kilogram-
+  // minutes held). Races are left as they are: running costs about the same energy per
+  // kilogram for everyone, so a time already reflects fitness per kilogram. These boards are
+  // never stored, and the '-' in their ids keeps them apart from stored exercise keys.
+  // Bodyweight is kg with one decimal, within BODYWEIGHT (matching SQL).
   const BODYWEIGHT = { MIN: 30, MAX: 300 };
-  const bodyweightBoards = [...main, 'total'].map((base) => {
-    const { emoji, label } = base === 'total' ? TOTAL : all.find((e) => e.id === base);
-    return { id: `bw-${base}`, base, emoji, label, unit: 'ratio', group: 'bodyweight' };
-  });
+  const ADJUSTED = { kg: 'bw-ratio', reps: 'bw-reps', time: 'bw-time' };
+  const bodyweightBoards = [...all, TOTAL].filter((e) => !e.lowerIsBetter && e.bodyweight !== false)
+    .map(({ id, emoji, label, unit, group }) => ({ id: `bw-${id}`, base: id, emoji, label, unit: ADJUSTED[unit], group }));
+  // The bodyweight version of a board, or undefined when bodyweight doesn't adjust it.
+  const bodyweightBoard = (id) => bodyweightBoards.find((b) => b.base === id);
   // Form sections and tabs, in display order.
   const groups = [
     { id: 'main', emoji: '🏋️', label: 'Main lifts' },
@@ -65,20 +73,24 @@ window.Lifts = (() => {
   const value = (athlete, id) => id === 'total'
     // Sum integer tenths so equal decimal totals also share an exact rank.
     ? main.reduce((sum, lift) => sum + Math.round(number(athlete[lift]) * 10), 0) / 10
-    : unit(id) === 'ratio' ? ratio(athlete, get(id).base)
+    : get(id)?.base ? adjusted(athlete, get(id))
     : number(main.includes(id) ? athlete[id] : athlete.lifts?.[id]);
   // The athlete's shared bodyweight in kg, or null when they haven't shared one.
   const bodyweight = (athlete) => number(athlete?.bodyweight) || null;
-  // Kilograms lifted per kilogram of bodyweight, rounded to the hundredths that are shown,
-  // so equal ratios share a rank. Zero (off the board) without a shared bodyweight.
-  const ratio = (athlete, base) => {
+  // A bodyweight board's score, rounded to what is shown (hundredths of a ratio, whole kg or
+  // kg·min) so equal scores share a rank. Zero (off the board) without a shared bodyweight.
+  const adjusted = (athlete, { base, unit: scale }) => {
     const weight = bodyweight(athlete);
-    return weight ? Math.round((value(athlete, base) * 100) / weight) / 100 : 0;
+    if (!weight) return 0;
+    const score = value(athlete, base);
+    return scale === 'bw-ratio' ? Math.round((score * 100) / weight) / 100
+      : Math.round(scale === 'bw-time' ? (score * weight) / 60 : score * weight);
   };
   const format = (id, raw) => unit(id) === 'time' ? formatTime(raw)
-    : unit(id) === 'reps' ? String(Math.round(number(raw)))
-    : unit(id) === 'ratio' ? `${number(raw).toFixed(2)}×` : number(raw).toFixed(1);
-  const formatUnit = (id, raw) => format(id, raw) + ({ time: '', ratio: ' BW' }[unit(id)] ?? ` ${unit(id)}`);
+    : ['reps', 'bw-reps', 'bw-time'].includes(unit(id)) ? String(Math.round(number(raw)))
+    : unit(id) === 'bw-ratio' ? `${number(raw).toFixed(2)}×` : number(raw).toFixed(1);
+  const SUFFIX = { kg: ' kg', reps: ' reps', time: '', 'bw-ratio': ' BW', 'bw-reps': ' kg', 'bw-time': ' kg·min' };
+  const formatUnit = (id, raw) => format(id, raw) + SUFFIX[unit(id)];
   // Signed change in the exercise's unit: "+12.5 kg", "−0:08", "+3 reps".
   const formatDelta = (id, delta) => {
     const sign = delta > 0 ? '+' : delta < 0 ? '−' : '';
@@ -130,6 +142,6 @@ window.Lifts = (() => {
     return n;
   };
 
-  return { MAX, BODYWEIGHT, all, main, extra, groups, bodyweightBoards, get, inGroup, unit, value, bodyweight, format,
+  return { MAX, BODYWEIGHT, all, main, extra, groups, bodyweightBoards, bodyweightBoard, get, inGroup, unit, value, bodyweight, format,
     formatUnit, formatDelta, improves, ranked, parse, parseBodyweight, inputValue, unitHint, formatTime, parseTime };
 })();

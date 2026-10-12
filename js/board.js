@@ -3,6 +3,7 @@
 // app.js owns the DOM.
 //
 // Render context (ctx): { athletes, tv, loading, error, viewportHeight,
+//   bodyweight: boolean       ⚖️ Bodyweight ranking: boards are swapped for their bodyweight versions
 //   pending: Set<athleteId>   athletes with a pending change (⏳)
 //   fresh: Map<"athleteId:liftId", decidedAt>  PRs verified recently (🔥)
 //   me: athleteId | null      the signed-in member's athlete, highlighted
@@ -22,16 +23,17 @@ window.BoardView = (() => {
   const icon = (emoji) => html`<span aria-hidden="true">${emoji}</span>`;
   const avatar = (athlete, size) => raw(window.renderAvatar(athlete, size, { decorative: true }));
 
+  // A bodyweight board's title says how it is adjusted; its score column names the unit.
   const title = (lift) => lift.id === 'total' ? html`${icon(lift.emoji)} Total (Combined)`
-    : html`${icon(lift.emoji)} ${lift.label}${lift.unit === 'ratio' && ' / BW'}`;
-  const scoreHeading = (lift) => lift.id === 'total' ? 'Total (kg)' : lift.unit === 'ratio' ? '× BW'
-    : lift.unit === 'time' ? 'Time' : lift.unit === 'reps' ? 'Reps' : 'PR (kg)';
+    : html`${icon(lift.emoji)} ${lift.label}${lift.base && (lift.unit === 'bw-ratio' ? ' / BW' : ' × BW')}`;
+  const HEADINGS = { 'bw-ratio': '× BW', 'bw-reps': 'kg', 'bw-time': 'kg·min', time: 'Time', reps: 'Reps' };
+  const scoreHeading = (lift) => lift.id === 'total' ? 'Total (kg)' : HEADINGS[lift.unit] ?? 'PR (kg)';
 
   const badges = (athlete) => (athlete.achievements || []).map((id) => window.getAchievement(id)).filter(Boolean)
     .map((a) => html`<span class="badge-chip" title="${a.name}">${a.emoji}</span>`);
 
   // Status chips after a name: a pending change, or a PR verified in the last week
-  // (on a bodyweight board, a fresh PR in the lift it divides).
+  // (on a bodyweight board, a fresh PR in the exercise it adjusts).
   function chips(athlete, liftId, ctx) {
     const freshAt = ctx.fresh?.get(`${athlete.id}:${Lifts.get(liftId)?.base ?? liftId}`);
     return html`${ctx.pending?.has(athlete.id) && raw('<span class="badge-chip pending" title="Has a pending change">⏳</span>')}${
@@ -101,7 +103,7 @@ window.BoardView = (() => {
     const withPodium = ranked.length > 0 && showsPodium(winners, ctx);
     const tableRows = withPodium ? ranked.filter((r) => r.rank > 3) : ranked;
     const body = ranked.length === 0
-      ? emptyRow(ctx, 3, lift.unit === 'ratio' ? html`No one on this board yet.<br><span>Share your bodyweight in My PRs to join.</span>` : undefined)
+      ? emptyRow(ctx, 3, lift.base ? html`No one on this board yet.<br><span>Share your bodyweight in My PRs to join.</span>` : undefined)
       : tableRows.map((r) => row(r, lift, ctx));
     return html`<div class="leaderboard-section${liftId === 'total' ? ' leaderboard-total' : ''}" data-lift="${liftId}">
           <h2>${title(lift)}</h2>${withPodium && podium(winners, lift, ctx)}
@@ -128,11 +130,12 @@ window.BoardView = (() => {
     </div>`;
   }
 
-  // All boards of a tab group ('main', 'total', 'bodyweight', 'other', 'cardio', 'latest').
+  // All boards of a tab group ('main', 'total', 'other', 'cardio', 'latest'), each in its
+  // bodyweight version while ⚖️ Bodyweight ranking is on (races have none).
   function group(name, ctx) {
     if (name === 'latest') return latest(ctx);
-    const ids = name === 'total' ? ['total'] : name === 'bodyweight' ? Lifts.bodyweightBoards.map((b) => b.id)
-      : Lifts.inGroup(name).map((e) => e.id);
+    const ids = (name === 'total' ? ['total'] : Lifts.inGroup(name).map((e) => e.id))
+      .map((id) => (ctx.bodyweight && Lifts.bodyweightBoard(id)?.id) || id);
     return ids.length ? html`${ids.map((id) => section(id, ctx))}` : html`<p class="empty-state">Nothing here yet.</p>`;
   }
 
