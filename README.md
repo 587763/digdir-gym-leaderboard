@@ -116,7 +116,7 @@ was verified, and the remaining follow-ups.
 For an existing database, apply the numbered files in
 [`supabase/migrations/`](supabase/migrations/) in order in the Supabase SQL Editor before
 deploying the frontend that needs them (the live database has everything through
-`0008_bodyweight.sql`). They preserve existing data. For a fresh installation, use
+`0009_strict_curl.sql`). They preserve existing data. For a fresh installation, use
 `supabase/schema.sql` instead; that file resets the tables.
 
 ## Backups

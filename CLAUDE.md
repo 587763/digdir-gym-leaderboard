@@ -205,10 +205,10 @@ still advances. A PR verified while the board is open gets a celebration banner.
 
 ## Database upgrades and deployment
 Apply migrations in order through the Supabase SQL Editor before deploying the frontend that
-needs them; production has 0002–0008 (0001 was superseded; 0008 applied 12 October 2026).
+needs them; production has 0002–0009 (0001 was superseded; 0008 and 0009 applied 12 October 2026).
 The frontend selects `athletes.archived_at` (since 3.2, 0007) and `athletes.bodyweight` (since
-3.3, 0008), so it cannot load boards on a database without them. 0009 is pending: until it is
-applied, strict curls accept only whole kilograms (42.5 is refused). Migrations are
+3.3, 0008), so it cannot load boards on a database without them; without 0009, strict curls
+accept only whole kilograms. Migrations are
 transactional and idempotent and rewrite no rows; 0006 stops with a named athlete if a
 stored value breaks its unit. Tests execute migrations in local Postgres (PGlite). Check the
 backup workflow ran recently before applying one (see Backups).
