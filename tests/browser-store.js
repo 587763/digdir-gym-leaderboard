@@ -5,11 +5,13 @@
   let athletes = fixture === 'empty' ? [] : Array.from({length:fixture==='large'?65:6},(_,i)=>({
     id:`athlete-${i}`,name:names[i] || `Athlete ${i + 1}`,bench:140-i,squat:160-i,deadlift:180-i,
     lifts:{deadhang:90+i,pullups:12,run1k:240+i},achievements:['gripper90kg'],
+    // Every third athlete keeps their bodyweight to themselves (off the ⚖️ boards).
+    bodyweight:i % 3 === 2 ? null : 72 + (i * 7) % 40,
     updated_at:'2026-09-01T08:00:00Z',
   }));
   if (fixture === 'layout') athletes = athletes.map((a, i) => ({
     ...a, name: i < 3 ? `${'Longathletename'.repeat(4)} ${i + 1}` : a.name,
-    bench: 99999 - i / 10, squat: 99999 - i / 10, deadlift: 99999 - i / 10,
+    bench: 99999 - i / 10, squat: 99999 - i / 10, deadlift: 99999 - i / 10, bodyweight: 30 + i / 10,
     lifts: {deadhang:99999 - i, pullups:99999 - i, pushups:99999 - i, run1k:99999 - i},
   }));
   // An archived athlete: off the boards, records and verified history kept.
@@ -52,6 +54,7 @@
     decide:async(id)=>{proposals=proposals.filter((p)=>p.id!==id);},
     withdraw:async(id)=>{proposals=proposals.filter((p)=>p.id!==id);},
     restoreMyAthlete:async()=>{const a=athletes.find((x)=>x.id===me.athlete_id); if(a) a.archived_at=null;},
+    setMyBodyweight:async(kg)=>{athletes.find((x)=>x.id===me.athlete_id).bodyweight=kg;},
     adminSetArchived:async(id,archived)=>{athletes.find((a)=>a.id===id).archived_at=archived?new Date().toISOString():null;},
     adminUpdateProfile:async(id,patch)=>Object.assign(profiles.find((p)=>p.user_id===id),patch),
     adminCreateAthlete:async(data)=>athletes.push({...data,id:crypto.randomUUID()}),

@@ -5,7 +5,7 @@ import { application, athlete } from './helpers.mjs';
 test('unconfigured app still renders all tabs and explains the missing connection', async () => {
   const { app, document } = await application({configured:false});
   assert.ok(document.querySelector('.config-banner'));
-  assert.equal(document.querySelectorAll('.leaderboard-section').length, 9); // 7 exercises, total, latest
+  assert.equal(document.querySelectorAll('.leaderboard-section').length, 13); // 7 exercises, total, 4 per bodyweight, latest
   app.switchTab('cardio');
   assert.equal(document.getElementById('tab-cardio').getAttribute('aria-selected'), 'true');
   assert.equal(document.getElementById('signInBtn').disabled, true);
@@ -445,3 +445,104 @@ test('the claim dialog offers archived athletes to people coming back', async ()
   assert.equal(document.querySelector('#claimSelect > option[value="a"]').textContent,'Ada');
   assert.match(String(app.describeRequest({kind:'claim',athlete_id:'r',payload:{}})),/approving brings them back/);
 });
+test('the bodyweight tab is opt-in for each viewer and remembered', async () => {
+  const athletes=[athlete('a',{name:'Ada',bench:100,bodyweight:80}),athlete('b',{name:'Bo',bench:120})];
+  const {app,context,document}=await application({listAthletes:async()=>athletes});
+  const tab=document.getElementById('tab-bodyweight');
+  assert.equal(tab.hidden,true);
+  assert.equal(app.tv.rotationTabs().includes('bodyweight'),false);
+  app.switchTab('bodyweight');
+  assert.equal(app.activeTab,'lifts','a hidden tab cannot be opened');
+  app.switchTab('total');
+  app.onTabKey({target:document.getElementById('tab-total'),key:'ArrowRight',preventDefault(){}});
+  assert.equal(app.activeTab,'other','arrow keys skip the hidden tab');
+  let saved;
+  context.localStorage.setItem=(key,value)=>{saved=[key,value];};
+  app.toggleBodyweight();
+  assert.deepEqual(saved,['lb.bodyweight','1']);
+  assert.equal(tab.hidden,false);
+  assert.equal(app.activeTab,'bodyweight','turning it on shows it');
+  assert.equal(document.getElementById('bodyweightBtn').getAttribute('aria-pressed'),'true');
+  // Only athletes who shared a bodyweight are ranked.
+  assert.deepEqual([...document.querySelectorAll('[data-lift="bw-bench"] [data-action="history"]')].map((b)=>b.dataset.id),['a']);
+  app.toggleBodyweight();
+  assert.deepEqual(saved,['lb.bodyweight','0']);
+  assert.equal(tab.hidden,true);
+  assert.equal(app.activeTab,'lifts','turning it off leaves the tab');
+  context.localStorage.getItem=(key)=>key==='lb.bodyweight'?'1':null;
+  assert.equal(app.bodyweightPreference(),true,'the choice survives a reload');
+});
+test('a TV rotates to the bodyweight boards only when they were turned on and someone shared a bodyweight', async () => {
+  const shared=async()=>[athlete('a',{bench:100,bodyweight:80})];
+  const rotation=async(search,listAthletes=shared)=>[...(await application({listAthletes},{search})).app.tv.rotationTabs()];
+  assert.equal((await rotation('?tv')).includes('bodyweight'),false);
+  assert.deepEqual(await rotation('?tv&bodyweight'),['lifts','total','bodyweight','other','cardio','fun']);
+  assert.deepEqual(await rotation('?tv&tabs=bodyweight,total'),['total','bodyweight'],'naming it in ?tabs turns it on');
+  assert.equal((await rotation('?tv&bodyweight',async()=>[athlete('a',{bench:100})])).includes('bodyweight'),false);
+});
+test('members share and clear their bodyweight in My PRs at once, without a review', async () => {
+  const me=athlete('me',{bench:100});
+  const {app,store,document}=await application({
+    getSession:async()=>({user:{id:'user'}}),myProfile:async()=>({athlete_id:'me',status:'active'}),
+    listAthletes:async()=>[me],
+  });
+  const sent=[], weights=[];
+  store.propose=async(kind,_id,payload)=>sent.push([kind,payload.lift]);
+  store.setMyBodyweight=async(kg)=>{weights.push(kg);me.bodyweight=kg;};
+  app.openMine();
+  const field=document.getElementById('mineBodyweight');
+  assert.equal(field.value,'');
+  field.value='82.5';
+  await app.submitMine();
+  assert.deepEqual(weights,[82.5]);
+  assert.deepEqual(sent,[]);
+  assert.equal(document.querySelector('.toast').textContent,'Bodyweight saved');
+  app.openMine();
+  assert.equal(field.value,'82.5');
+  for (const bad of ['29.9','80.55','eighty']) {
+    field.value=bad;
+    await assert.rejects(()=>app.submitMine(),/Bodyweight: enter kilograms/,bad);
+  }
+  assert.deepEqual(weights,[82.5],'nothing is sent while a field is invalid');
+  field.value='';
+  document.getElementById('mine-bench').value='105';
+  await app.submitMine();
+  assert.deepEqual(weights,[82.5,null]);
+  assert.deepEqual(sent,[['pr','bench']]);
+  assert.equal(document.querySelector('.toast').textContent,'Submitted — 1 awaiting a peer. Bodyweight cleared');
+});
+test('admins correct or clear a bodyweight in the athlete editor', async () => {
+  const {app,store,document}=await application({listAthletes:async()=>[athlete('me',{bench:100,bodyweight:80})]});
+  app.profile={is_admin:true,status:'active'};
+  const patches=[];
+  store.adminUpdateAthlete=async(_id,patch)=>patches.push(patch);
+  app.openAthleteEditor('me');
+  assert.equal(document.getElementById('adminBodyweight').value,'80');
+  await app.saveAthlete();
+  app.openAthleteEditor('me');
+  document.getElementById('adminBodyweight').value='';
+  await app.saveAthlete();
+  assert.deepEqual(patches.map((patch)=>patch.bodyweight),[80,null]);
+});
+test('What\'s new lists every release and marks one this browser has not opened yet', async () => {
+  const {app,context,document}=await application();
+  const latest=context.CHANGELOG[0];
+  const link=document.getElementById('changelogBtn');
+  assert.equal(link.textContent,`✨ What's new in ${latest.version}`);
+  assert.ok(link.classList.contains('unseen'));
+  let saved;
+  context.localStorage.setItem=(key,value)=>{saved=[key,value];};
+  app.openChangelog();
+  assert.ok(document.getElementById('changelogModal').open);
+  assert.deepEqual(saved,['lb.changelog',latest.version]);
+  assert.ok(!link.classList.contains('unseen'));
+  const releases=document.querySelectorAll('#changelogBody .changelog-release');
+  assert.equal(releases.length,context.CHANGELOG.length);
+  assert.match(releases[0].querySelector('h3').textContent,new RegExp(`^${latest.version.replaceAll('.','\\.')} `));
+  assert.equal(releases[0].querySelectorAll('li').length,latest.changes.length);
+  // A browser that has seen the latest release shows no dot.
+  context.localStorage.getItem=(key)=>key==='lb.changelog'?latest.version:null;
+  app.renderChangelog();
+  assert.ok(!link.classList.contains('unseen'));
+});
+

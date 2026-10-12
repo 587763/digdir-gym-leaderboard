@@ -18,9 +18,9 @@ const CHROME = process.env.CHROME || [
 ].find(existsSync);
 if (!CHROME) { console.error('Chrome not found; set CHROME=/path/to/chrome'); process.exit(2); }
 
-const TABS = ['lifts', 'total', 'other', 'cardio', 'latest', 'fun'];
+const TABS = ['lifts', 'total', 'bodyweight', 'other', 'cardio', 'latest', 'fun'];
 const DIALOGS = ['app.openMine()', 'app.openReview()', 'app.openMembers()', 'app.openAthletes()',
-  "app.openAthleteEditor('athlete-1')", "app.openHistory('athlete-1')", "UI.dialogs.open('claimModal')"];
+  "app.openAthleteEditor('athlete-1')", "app.openHistory('athlete-1')", "UI.dialogs.open('claimModal')", 'app.openChangelog()'];
 const SCREENS = [
   { name: 'desktop', width: 1440, height: 1000, fixtures: ['admin', 'returning', 'layout', 'empty', 'error'] },
   { name: 'tablet', width: 820, height: 1180, fixtures: ['admin'] },
@@ -160,7 +160,8 @@ let checks = 0;
 try {
   for (const screen of SCREENS) {
     for (const fixture of screen.fixtures) {
-      await chrome.open(`?fixture=${fixture}${screen.tv ? '&tv&rotate=120' : ''}`, screen.width, screen.height);
+      // The opt-in ⚖️ Bodyweight tab is turned on, so every check covers it too.
+      await chrome.open(`?fixture=${fixture}&bodyweight${screen.tv ? '&tv&rotate=120' : ''}`, screen.width, screen.height);
       // Freeze rotation so tabs change only when the check says so.
       if (screen.tv) await chrome.run('(() => { app.tv.scheduleTick = () => {}; app.tv.stop(); })()');
       for (const tab of TABS) {

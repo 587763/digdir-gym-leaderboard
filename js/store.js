@@ -23,7 +23,7 @@
   }
 
   // Explicit columns: the live table also carries legacy fields the app never reads.
-  const ATHLETE_COLUMNS = 'id, name, bench, squat, deadlift, lifts, achievements, archived_at, updated_at';
+  const ATHLETE_COLUMNS = 'id, name, bench, squat, deadlift, lifts, achievements, bodyweight, archived_at, updated_at';
   const PROFILE_COLUMNS = 'user_id, github_login, display_name, is_admin, status, athlete_id';
   const PROPOSAL_COLUMNS = 'id, kind, approval, athlete_id, proposer, payload, status, created_at';
 
@@ -138,6 +138,12 @@
     async restoreMyAthlete() {
       const { error } = await connected().rpc('restore_my_athlete');
       if (error?.code === 'PGRST202') throw new Error('Restoring is not available yet. Ask an admin to restore your athlete.');
+      if (error) throw error;
+    },
+
+    // A linked member shares, changes or clears (null) their own bodyweight, without review (0008).
+    async setMyBodyweight(kg) {
+      const { error } = await connected().rpc('set_my_bodyweight', { p_bodyweight: kg });
       if (error) throw error;
     },
 

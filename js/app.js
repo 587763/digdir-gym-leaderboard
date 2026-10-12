@@ -31,6 +31,7 @@ class LeaderboardApp {
     this.identityVersion = 0;
     this.readTimeoutMs = READ_TIMEOUT_MS;
     this.tv = new TvDisplay(this);
+    this.bodyweight = this.bodyweightPreference(); // show the opt-in ⚖️ Bodyweight tab
     this.ready = this.init();
   }
 
@@ -46,9 +47,11 @@ class LeaderboardApp {
 
   async init() {
     this.buildForms();
+    this.renderChangelog();
     this.bindEvents();
     UI.dialogs.setup();
     UI.dialogs.onChange((open) => (open ? this.tv.stop() : this.tv.restart()));
+    this.applyBodyweight(this.bodyweight);
     const linked = location.hash.slice(1);
     if (document.getElementById(`${linked}-tab`)) this.switchTab(linked);
     this.reflectAuth();
@@ -252,10 +255,12 @@ class LeaderboardApp {
     return root;
   }
 
-  // Tabs with nothing to show are skipped by the TV rotation.
+  // Tabs with nothing to show are skipped by the TV rotation, as is the ⚖️ Bodyweight tab
+  // unless it was turned on: its boards need a shared bodyweight and a main lift.
   hasContent(tab) {
     if (tab === 'other' || tab === 'cardio') return Lifts.inGroup(tab).length > 0;
     if (tab === 'latest') return this.latestPrs().length > 0;
+    if (tab === 'bodyweight') return this.bodyweight && this.athletes.some((a) => Lifts.value(a, 'bw-total') > 0);
     return !!document.getElementById(`${tab}-tab`);
   }
 
@@ -376,6 +381,8 @@ class LeaderboardApp {
       'sign-in': () => Store.signIn(),
       'sign-out': () => Store.signOut(),
       'toggle-tv': () => this.tv.toggle(),
+      'toggle-bodyweight': () => this.toggleBodyweight(),
+      'open-changelog': () => this.openChangelog(),
       retry: () => this.refreshAll(),
       'open-mine': () => this.openMine(),
       'open-claim': () => this.openClaim(),
@@ -443,7 +450,7 @@ class LeaderboardApp {
   }
 
   onTabKey(event) {
-    const tabs = [...document.querySelectorAll('.tab-btn')];
+    const tabs = [...document.querySelectorAll('.tab-btn:not([hidden])')];
     const index = tabs.indexOf(event.target);
     if (index < 0 || !['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
     event.preventDefault();
@@ -456,7 +463,8 @@ class LeaderboardApp {
   // --- tabs -----------------------------------------------------------------
   // remember: a visitor's choice becomes the URL hash, so board links can be shared.
   switchTab(tab, { remember = false } = {}) {
-    if (!document.getElementById(`${tab}-tab`)) return;
+    // A hidden tab (⚖️ Bodyweight while it's off) cannot be opened, not even by a link.
+    if (!document.getElementById(`${tab}-tab`) || document.getElementById(`tab-${tab}`).hidden) return;
     this.activeTab = tab;
     document.querySelector('.skip-link').setAttribute('href', `#${tab}-tab`);
     document.querySelectorAll('.tab-btn').forEach((b) => {
@@ -469,6 +477,33 @@ class LeaderboardApp {
     this.revealActiveTab();
     if (remember && !this.tv.enabled) history.replaceState(null, '', `#${tab}`);
     this.tv.onTabChange();
+  }
+
+  // --- bodyweight boards --------------------------------------------------------
+  // Each viewer opts in to the ⚖️ Bodyweight tab, so a TV only rotates to it when it was
+  // turned on in that browser, or by ?bodyweight or a ?tabs list that names it.
+  bodyweightPreference(params = new URLSearchParams(location.search)) {
+    let saved = false;
+    try { saved = localStorage.getItem('lb.bodyweight') === '1'; } catch { /* Storage may be disabled. */ }
+    return saved || params.has('bodyweight') || this.tv.onlyTabs.includes('bodyweight');
+  }
+
+  applyBodyweight(on) {
+    this.bodyweight = on;
+    document.getElementById('bodyweightBtn').setAttribute('aria-pressed', String(on));
+    document.getElementById('tab-bodyweight').hidden = !on;
+    if (!on && this.activeTab === 'bodyweight') this.switchTab('lifts', { remember: true });
+  }
+
+  toggleBodyweight() {
+    const on = !this.bodyweight;
+    try { localStorage.setItem('lb.bodyweight', on ? '1' : '0'); } catch { /* private mode */ }
+    // Keep the URL honest so a reload or a shared link matches what's on screen.
+    const url = new URL(location.href);
+    if (on) url.searchParams.set('bodyweight', '1'); else url.searchParams.delete('bodyweight');
+    history.replaceState(null, '', url);
+    this.applyBodyweight(on);
+    if (on) this.switchTab('bodyweight', { remember: true });
   }
 
   // A phone's tab strip scrolls sideways: keep the selected tab in view.
@@ -487,6 +522,10 @@ class LeaderboardApp {
     document.getElementById('mineAchievementFields').innerHTML = checks('mine-achievement-check');
     document.getElementById('mineLiftFields').innerHTML = this.liftFields('mine');
     document.getElementById('adminLiftFields').innerHTML = this.liftFields('admin');
+    document.getElementById('mineBodyweightField').innerHTML = this.bodyweightField('mineBodyweight',
+      'Optional. It puts you on the ⚖️ Bodyweight boards, and anyone can work it out from your ratios there. Saved straight away, without review; clear it to leave.');
+    document.getElementById('adminBodyweightField').innerHTML = this.bodyweightField('adminBodyweight',
+      'Members share this themselves in My PRs. Correct it, or clear it if they ask.');
   }
 
   // One fieldset per board group; each input is named after its exercise id.
@@ -503,6 +542,21 @@ class LeaderboardApp {
           </div>`)}
         </div>
       </fieldset>`)}`;
+  }
+
+  // Opt-in bodyweight for the ⚖️ Bodyweight boards; a blank field means not shared.
+  bodyweightField(id, note) {
+    const { MIN, MAX } = Lifts.BODYWEIGHT;
+    return html`<fieldset class="lift-fields">
+        <legend class="form-section-title"><span aria-hidden="true">⚖️</span> Bodyweight</legend>
+        <div class="form-grid">
+          <div class="form-group">
+            <label for="${id}">Bodyweight <span class="unit">(kg)</span></label>
+            <input type="number" id="${id}" min="${MIN}" max="${MAX}" step="0.1" inputmode="decimal" placeholder="not shared" aria-describedby="${id}-note">
+          </div>
+        </div>
+        <p class="field-note" id="${id}-note">${note}</p>
+      </fieldset>`;
   }
 
   fillLiftFields(prefix, athlete) {
@@ -530,6 +584,19 @@ class LeaderboardApp {
       const hint = Lifts.unit(liftId) === 'time' ? 'm:ss or whole seconds'
         : Lifts.unit(liftId) === 'reps' ? 'a whole number' : 'kilograms with at most one decimal';
       throw new Error(`${Lifts.get(liftId).label}: enter ${hint} (maximum ${Lifts.MAX}).`);
+    }
+    return value;
+  }
+
+  // Blank clears the bodyweight. A number field reports text it can't read (such as a
+  // comma decimal in some browsers) as blank, so that is refused rather than clearing it.
+  readBodyweight(inputId) {
+    const input = document.getElementById(inputId);
+    const value = input.validity?.badInput ? NaN : Lifts.parseBodyweight(input.value);
+    if (Number.isNaN(value)) {
+      input.focus();
+      const { MIN, MAX } = Lifts.BODYWEIGHT;
+      throw new Error(`Bodyweight: enter kilograms from ${MIN} to ${MAX} with at most one decimal, or leave it blank.`);
     }
     return value;
   }
@@ -588,10 +655,11 @@ class LeaderboardApp {
     if (!a) return UI.toast('Your athlete is missing', 'error');
     document.getElementById('mineName').value = a.name;
     this.fillLiftFields('mine', a);
+    document.getElementById('mineBodyweight').value = Lifts.bodyweight(a) ?? '';
     const earned = a.achievements || [];
     document.querySelectorAll('.mine-achievement-check').forEach((c) => { c.checked = earned.includes(c.value); });
     this.mineSnapshot = {
-      name: a.name, achievements: [...earned],
+      name: a.name, achievements: [...earned], bodyweight: Lifts.bodyweight(a),
       values: Object.fromEntries(Lifts.all.map((e) => [e.id, Lifts.value(a, e.id)])),
     };
     this.renderOwnRequests('minePending', null);
@@ -609,12 +677,15 @@ class LeaderboardApp {
       const value = this.readLift(e.id, `mine-${e.id}`);
       if (value !== snap.values[e.id]) proposals.push(['pr', { lift: e.id, value }]);
     }
+    // The member's own bodyweight is saved directly, after the requests.
+    const bodyweight = this.readBodyweight('mineBodyweight');
+    const reweigh = bodyweight !== snap.bodyweight;
     const checked = [...document.querySelectorAll('.mine-achievement-check')].filter((c) => c.checked).map((c) => c.value);
     for (const id of checked) if (!snap.achievements.includes(id)) proposals.push(['achievement', { achievement_id: id, op: 'add' }]);
     // Only achievements with a form field can be removed from here.
     for (const id of snap.achievements) if (window.getAchievement(id) && !checked.includes(id)) proposals.push(['achievement', { achievement_id: id, op: 'remove' }]);
 
-    if (proposals.length === 0) { UI.dialogs.close('mineModal'); return UI.toast('No changes', 'success'); }
+    if (proposals.length === 0 && !reweigh) { UI.dialogs.close('mineModal'); return UI.toast('No changes', 'success'); }
     for (const [kind, payload] of proposals) {
       await Store.propose(kind, a.id, payload);
       // Remember accepted fields so a retry after a failure sends only the rest.
@@ -623,11 +694,17 @@ class LeaderboardApp {
       else if (payload.op === 'add') snap.achievements.push(payload.achievement_id);
       else snap.achievements = snap.achievements.filter((id) => id !== payload.achievement_id);
     }
+    if (reweigh) {
+      await Store.setMyBodyweight(bodyweight);
+      snap.bodyweight = bodyweight;
+    }
     UI.dialogs.close('mineModal');
     await this.refreshAll();
     const peer = proposals.filter(([kind]) => kind !== 'rename').length;
     const admin = proposals.length - peer;
-    UI.toast(`Submitted — ${[peer && `${peer} awaiting a peer`, admin && `${admin} awaiting an admin`].filter(Boolean).join(', ')}`, 'success');
+    const waiting = [peer && `${peer} awaiting a peer`, admin && `${admin} awaiting an admin`].filter(Boolean).join(', ');
+    const weighed = reweigh && (bodyweight == null ? 'Bodyweight cleared' : 'Bodyweight saved');
+    UI.toast([waiting && `Submitted — ${waiting}`, weighed].filter(Boolean).join('. '), 'success');
   }
 
   async withdraw(id) {
@@ -845,6 +922,7 @@ class LeaderboardApp {
     document.getElementById('modalTitle').textContent = a ? 'Edit athlete' : 'Add athlete';
     document.getElementById('athleteName').value = a?.name ?? '';
     this.fillLiftFields('admin', a);
+    document.getElementById('adminBodyweight').value = Lifts.bodyweight(a) ?? '';
     document.querySelectorAll('#achievementFields .achievement-check').forEach((c) => { c.checked = !!a?.achievements?.includes(c.value); });
     this.updateAvatarPreview();
     UI.dialogs.open('athleteModal');
@@ -863,6 +941,7 @@ class LeaderboardApp {
     // Keep unknown extra-lift keys and unregistered achievements from older versions.
     data.lifts = { ...(original?.lifts || {}) };
     for (const e of Lifts.extra) data.lifts[e.id] = this.readLift(e.id, `admin-${e.id}`);
+    data.bodyweight = this.readBodyweight('adminBodyweight');
     data.achievements = [
       ...(original?.achievements || []).filter((id) => !window.getAchievement(id)),
       ...[...document.querySelectorAll('#achievementFields .achievement-check')].filter((c) => c.checked).map((c) => c.value),
@@ -881,6 +960,28 @@ class LeaderboardApp {
     await Store.adminDeleteAthlete(id);
     await this.refreshAll();
     UI.toast('Deleted permanently', 'success');
+  }
+
+  // --- changelog ----------------------------------------------------------------
+  // ✨ What's new lists js/changelog.js. Its link carries a dot until this browser has
+  // opened the latest release.
+  renderChangelog() {
+    const latest = window.CHANGELOG[0];
+    document.getElementById('changelogBody').innerHTML = html`${window.CHANGELOG.map((release) => html`
+      <section class="changelog-release">
+        <h3>${release.version} <span class="changelog-date">${UI.formatDate(`${release.date}T12:00:00Z`)}</span></h3>
+        <ul>${release.changes.map((change) => html`<li>${change}</li>`)}</ul>
+      </section>`)}`;
+    document.getElementById('changelogVersion').textContent = latest.version;
+    let seen = null;
+    try { seen = localStorage.getItem('lb.changelog'); } catch { /* Storage may be disabled. */ }
+    document.getElementById('changelogBtn').classList.toggle('unseen', seen !== latest.version);
+  }
+
+  openChangelog() {
+    try { localStorage.setItem('lb.changelog', window.CHANGELOG[0].version); } catch { /* private mode */ }
+    document.getElementById('changelogBtn').classList.remove('unseen');
+    UI.dialogs.open('changelogModal');
   }
 
   // --- history / progression --------------------------------------------------

@@ -6,7 +6,7 @@ import { read, environment } from './helpers.mjs';
 let db;
 const ids = Object.fromEntries(['admin','member','peer','pending','blocked','missing','deputy','newcomer','reviewer'].map((key,i)=>[key,`00000000-0000-4000-8000-${String(i+1).padStart(12,'0')}`]));
 const governance='supabase/migrations/0005_governance_hardening.sql', safeguards='supabase/migrations/0006_member_safeguards.sql',
-  archiving='supabase/migrations/0007_archive_athletes.sql';
+  archiving='supabase/migrations/0007_archive_athletes.sql', bodyweights='supabase/migrations/0008_bodyweight.sql';
 let athletes, freshCatalog;
 async function as(user) {
   await db.exec('reset role');
@@ -19,6 +19,7 @@ async function propose(kind, athleteId, payload) {
 async function decide(id, approve=true) { return db.query('select public.decide($1,$2)',[id,approve]); }
 async function withdraw(id) { return db.query('select public.withdraw($1)',[id]); }
 async function restore() { return (await db.query('select public.restore_my_athlete() as id')).rows[0].id; }
+async function setBodyweight(kg) { return db.query('select public.set_my_bodyweight($1)',[kg]); }
 // Rows as stored, read past RLS.
 async function stored(sql,params=[]) { await db.exec('reset role'); return (await db.query(sql,params)).rows; }
 // Admins archive and restore athletes with ordinary updates.
@@ -55,7 +56,7 @@ async function catalog(pg) {
 const fresh=()=>freshCatalog??=database().then(async(pg)=>{try{return await catalog(pg);}finally{await pg.close();}});
 before(async()=>{
   db = await database();
-  for(const file of [governance,governance,safeguards,safeguards,archiving,archiving]) await db.exec(read(file));
+  for(const file of [governance,governance,safeguards,safeguards,archiving,archiving,bodyweights,bodyweights]) await db.exec(read(file));
   await db.exec('grant usage on schema public,auth to authenticated,anon; grant select,insert,update,delete on all tables in schema public to authenticated; grant select on all tables in schema public to anon;');
   for(const [name,id] of Object.entries(ids)) {
     if(name==='missing') continue;
@@ -79,6 +80,7 @@ test('fresh schema already contains every migrated definition',async()=>{
   // Including what the newest migration adds and changes.
   const def=(name)=>migrated.find((row)=>row.name===name)?.def;
   assert.ok(def('athletes.archived_at')&&def('restore_my_athlete()'));
+  assert.ok(def('athletes.bodyweight')&&def('set_my_bodyweight(numeric)'));
   assert.equal(def('proposals.proposer'),'uuid YES');
   assert.match(def('proposals.proposals_proposer_fkey'),/ON DELETE SET NULL/);
 });
@@ -384,6 +386,55 @@ test('permanently deleting an athlete still erases its requests and history',asy
   // The member's account stays, unlinked.
   assert.deepEqual(await stored('select athlete_id from profiles where user_id=$1',[ids.deputy]),[{athlete_id:null}]);
 });
+test('members share, change and clear their own bodyweight at once, and only their own',async()=>{
+  const [own,other]=[athletes[0].id,athletes[1].id];
+  const weight=async(id)=>(await stored('select bodyweight from athletes where id=$1',[id]))[0].bodyweight;
+  const others=()=>stored('select * from athletes where id<>$1 order by id',[own]);
+  const untouched=await others();
+  const requests=(await stored('select count(*)::int as n from proposals'))[0].n;
+  await as('member');
+  await setBodyweight(82.5);
+  assert.equal(Number(await weight(own)),82.5);
+  await setBodyweight(81);
+  assert.equal(Number(await weight(own)),81);
+  for(const kg of [29.9,300.1,80.25,-1,0]) await assert.rejects(()=>setBodyweight(kg),/between 30 and 300 kg/,String(kg));
+  // Only their own row changes, and nothing enters the review queue or the history.
+  assert.deepEqual(await others(),untouched);
+  assert.equal((await stored('select count(*)::int as n from proposals'))[0].n,requests);
+  // Signed-out visitors see it, as they see the rest of the board.
+  await db.exec('reset role; set role anon');
+  assert.equal(Number((await db.query('select bodyweight from athletes where id=$1',[own])).rows[0].bodyweight),81);
+  for(const [user,error] of [['signed-out',/not authenticated/],['missing',/no profile/],['blocked',/blocked/],['deputy',/not linked to an athlete/]]) {
+    await as(user); await assert.rejects(()=>setBodyweight(70),error,user);
+  }
+  // Members cannot write anyone's bodyweight directly, not even their own (RLS).
+  for(const id of [own,other]) {
+    await as('member');
+    assert.equal((await db.query('update athletes set bodyweight=60 where id=$1 returning id',[id])).rows.length,0);
+  }
+  // Admins correct it with an ordinary update, within the same limits.
+  await as('admin');
+  assert.equal((await db.query('update athletes set bodyweight=90 where id=$1 returning id',[other])).rows.length,1);
+  await assert.rejects(()=>db.query('update athletes set bodyweight=301 where id=$1',[other]),/bodyweight_check/);
+  await db.query('update athletes set bodyweight=null where id=$1',[other]);
+  // Clearing it works at any time, archived or not, and leaves no copy behind.
+  const settled=await others();
+  await setArchived(own,true);
+  await as('member'); await setBodyweight(null);
+  assert.equal(await weight(own),null);
+  await setArchived(own,false);
+  assert.deepEqual(await others(),settled);
+});
+test('SQL bodyweight limits match the frontend',async()=>{
+  const { Lifts } = environment(['lifts']);
+  const { MIN, MAX } = Lifts.BODYWEIGHT;
+  await as('member');
+  for(const kg of [MIN,MAX]) await setBodyweight(kg);
+  for(const kg of [MIN-0.1,MAX+0.1]) await assert.rejects(()=>setBodyweight(kg),/between/,String(kg));
+  await as('admin');
+  for(const kg of [MIN-0.1,MAX+0.1]) await assert.rejects(()=>db.query('update athletes set bodyweight=$1 where id=$2',[kg,athletes[0].id]),/bodyweight_check/,String(kg));
+  await as('member'); await setBodyweight(null);
+});
 test('the last working admin cannot be demoted, blocked or deleted',async()=>{
   await db.exec('reset role');
   for(const sql of ["update profiles set is_admin=false where user_id=$1","update profiles set status='blocked' where user_id=$1",
@@ -429,7 +480,7 @@ test('fresh schema and migration use identical governance functions',()=>{
   // Each function is compared with the migration that last defines it.
   for(const [file,names] of [[governance,['handle_new_user','is_admin']],
     [safeguards,['lift_allows_decimals','validate_athlete_values','protect_last_admin']],
-    [archiving,['propose','decide','withdraw','restore_my_athlete']]]) {
+    [archiving,['propose','decide','withdraw','restore_my_athlete']],[bodyweights,['set_my_bodyweight']]]) {
     for(const name of names) assert.equal(extract(read('supabase/schema.sql'),name),extract(read(file),name),`${file}: ${name}`);
   }
 });
@@ -452,13 +503,13 @@ test('upgrading 0005 to 0006 preserves rows',async()=>{
   await as('member');
   const pending=await propose('pr',athletes[0].id,{lift:'pullups',value:15});
   await db.exec('reset role');
-  // Recreate a 0005 database: older function bodies, no safeguards or archiving, requests that
+  // Recreate a 0005 database: older function bodies, no safeguards, archiving or bodyweight, requests that
   // go with their proposer's account (so none without one), and other key names.
   await db.exec(read(governance));
   await db.exec(`drop trigger profiles_protect_last_admin on profiles;
-    drop function protect_last_admin(), withdraw(uuid), lift_allows_decimals(text), restore_my_athlete();
+    drop function protect_last_admin(), withdraw(uuid), lift_allows_decimals(text), restore_my_athlete(), set_my_bodyweight(numeric);
     drop index proposals_recent_prs;
-    alter table athletes drop column archived_at;
+    alter table athletes drop column archived_at, drop column bodyweight;
     delete from proposals where proposer is null;
     alter table proposals drop constraint proposals_decided_by_fkey,
       add constraint proposals_reviewer_fkey foreign key (decided_by) references profiles(user_id),
@@ -492,8 +543,22 @@ test('upgrading 0006 to 0007 preserves rows and matches the fresh schema',async(
   // Every athlete starts on the boards, and nothing else changes.
   assert.ok(upgraded.every((row)=>row.archived_at===null));
   assert.deepEqual([upgraded.map(({archived_at,...row})=>row),...others],before);
-  assert.deepEqual(await catalog(db),await fresh());
   // A request pending across the upgrade can still be verified.
   await as('peer'); await decide(pending);
   assert.equal((await stored('select lifts from athletes where id=$1',[athletes[0].id]))[0].lifts.pullups,16);
+});
+test('upgrading 0007 to 0008 preserves rows and matches the fresh schema',async()=>{
+  // Continues from the 0007 database the previous test upgraded: no bodyweight yet.
+  await db.exec('reset role');
+  assert.equal((await db.query("select to_regprocedure('public.set_my_bodyweight(numeric)') as fn")).rows[0].fn,null);
+  const before=await allRows();
+  await db.exec(read(bodyweights));
+  await db.exec(read(bodyweights));
+  const [upgraded,...others]=await allRows();
+  // Nobody is on the bodyweight boards until they share it, and nothing else changes.
+  assert.ok(upgraded.every((row)=>row.bodyweight===null));
+  assert.deepEqual([upgraded.map(({bodyweight,...row})=>row),...others],before);
+  assert.deepEqual(await catalog(db),await fresh());
+  await as('member'); await setBodyweight(80);
+  assert.equal(Number((await stored('select bodyweight from athletes where id=$1',[athletes[0].id]))[0].bodyweight),80);
 });

@@ -45,7 +45,7 @@ export function environment(files = ['ui', 'lifts', 'avatar', 'history']) {
 
 // The full app against an in-memory Store double; override any Store method.
 export async function application(overrides = {}, { search = '', hash = '' } = {}) {
-  const context = environment(['ui', 'achievements', 'lifts', 'avatar', 'history', 'board', 'tv']);
+  const context = environment(['ui', 'achievements', 'changelog', 'lifts', 'avatar', 'history', 'board', 'tv']);
   Object.assign(context.location, { search, hash });
   const store = {
     configured: true, getSession: async () => null, listAthletes: async () => [],

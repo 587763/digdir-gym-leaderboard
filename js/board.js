@@ -22,16 +22,18 @@ window.BoardView = (() => {
   const icon = (emoji) => html`<span aria-hidden="true">${emoji}</span>`;
   const avatar = (athlete, size) => raw(window.renderAvatar(athlete, size, { decorative: true }));
 
-  const title = (lift) => lift.id === 'total' ? html`${icon(lift.emoji)} Total (Combined)` : html`${icon(lift.emoji)} ${lift.label}`;
-  const scoreHeading = (lift) => lift.id === 'total' ? 'Total (kg)'
+  const title = (lift) => lift.id === 'total' ? html`${icon(lift.emoji)} Total (Combined)`
+    : html`${icon(lift.emoji)} ${lift.label}${lift.unit === 'ratio' && ' / BW'}`;
+  const scoreHeading = (lift) => lift.id === 'total' ? 'Total (kg)' : lift.unit === 'ratio' ? '× BW'
     : lift.unit === 'time' ? 'Time' : lift.unit === 'reps' ? 'Reps' : 'PR (kg)';
 
   const badges = (athlete) => (athlete.achievements || []).map((id) => window.getAchievement(id)).filter(Boolean)
     .map((a) => html`<span class="badge-chip" title="${a.name}">${a.emoji}</span>`);
 
-  // Status chips after a name: a pending change, or a PR verified in the last week.
+  // Status chips after a name: a pending change, or a PR verified in the last week
+  // (on a bodyweight board, a fresh PR in the lift it divides).
   function chips(athlete, liftId, ctx) {
-    const freshAt = ctx.fresh?.get(`${athlete.id}:${liftId}`);
+    const freshAt = ctx.fresh?.get(`${athlete.id}:${Lifts.get(liftId)?.base ?? liftId}`);
     return html`${ctx.pending?.has(athlete.id) && raw('<span class="badge-chip pending" title="Has a pending change">⏳</span>')}${
       freshAt && html`<span class="badge-chip fresh" title="New PR, verified ${UI.timeAgo(freshAt)}">🔥</span>`}`;
   }
@@ -98,7 +100,9 @@ window.BoardView = (() => {
     const winners = ranked.filter((r) => r.rank <= 3);
     const withPodium = ranked.length > 0 && showsPodium(winners, ctx);
     const tableRows = withPodium ? ranked.filter((r) => r.rank > 3) : ranked;
-    const body = ranked.length === 0 ? emptyRow(ctx) : tableRows.map((r) => row(r, lift, ctx));
+    const body = ranked.length === 0
+      ? emptyRow(ctx, 3, lift.unit === 'ratio' ? html`No one on this board yet.<br><span>Share your bodyweight in My PRs to join.</span>` : undefined)
+      : tableRows.map((r) => row(r, lift, ctx));
     return html`<div class="leaderboard-section${liftId === 'total' ? ' leaderboard-total' : ''}" data-lift="${liftId}">
           <h2>${title(lift)}</h2>${withPodium && podium(winners, lift, ctx)}
           <table class="leaderboard-table" id="${liftId}Table"${ranked.length > 0 && tableRows.length === 0 && raw(' hidden')}><thead><tr><th scope="col">Rank</th><th scope="col">Name</th><th scope="col">${scoreHeading(lift)}</th></tr></thead><tbody>${body}</tbody></table>
@@ -124,10 +128,11 @@ window.BoardView = (() => {
     </div>`;
   }
 
-  // All boards of a tab group ('main', 'total', 'other', 'cardio', 'latest').
+  // All boards of a tab group ('main', 'total', 'bodyweight', 'other', 'cardio', 'latest').
   function group(name, ctx) {
     if (name === 'latest') return latest(ctx);
-    const ids = name === 'total' ? ['total'] : Lifts.inGroup(name).map((e) => e.id);
+    const ids = name === 'total' ? ['total'] : name === 'bodyweight' ? Lifts.bodyweightBoards.map((b) => b.id)
+      : Lifts.inGroup(name).map((e) => e.id);
     return ids.length ? html`${ids.map((id) => section(id, ctx))}` : html`<p class="empty-state">Nothing here yet.</p>`;
   }
 
