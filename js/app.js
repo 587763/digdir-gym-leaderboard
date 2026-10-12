@@ -31,7 +31,7 @@ class LeaderboardApp {
     this.identityVersion = 0;
     this.readTimeoutMs = READ_TIMEOUT_MS;
     this.tv = new TvDisplay(this);
-    this.bodyweight = this.bodyweightPreference(); // show the opt-in ⚖️ Bodyweight tab
+    this.bodyweight = this.bodyweightPreference(); // ⚖️ Bodyweight ranking, opt-in per viewer
     this.ready = this.init();
   }
 
@@ -157,7 +157,7 @@ class LeaderboardApp {
   // truly unchanged refreshes still leave focused controls and open dialogs alone.
   boardSnapshot() {
     return JSON.stringify([this.user, this.profile, this.allAthletes, this.profiles,
-      this.proposals, this.recentPrs, this.loading, !!this.loadError,
+      this.proposals, this.recentPrs, this.loading, !!this.loadError, this.bodyweight,
       this.latestPrs().map((item) => UI.timeAgo(item.at)), [...this.freshPrs().keys()],
       this.proposals.map((p) => UI.timeAgo(p.created_at))]);
   }
@@ -218,7 +218,7 @@ class LeaderboardApp {
   // --- rendering ------------------------------------------------------------
   boardContext(podiumFits = true, hallTable = false) {
     return {
-      athletes: this.athletes, tv: this.tv.enabled, loading: this.loading, error: !!this.loadError,
+      athletes: this.athletes, tv: this.tv.enabled, loading: this.loading, error: !!this.loadError, bodyweight: this.bodyweight,
       pending: this.pendingAthletes(), fresh: this.freshPrs(), latest: this.latestPrs(),
       me: this.myAthleteId, podiumFits, hallTable, viewportHeight: window.innerHeight,
     };
@@ -255,12 +255,10 @@ class LeaderboardApp {
     return root;
   }
 
-  // Tabs with nothing to show are skipped by the TV rotation, as is the ⚖️ Bodyweight tab
-  // unless it was turned on: its boards need a shared bodyweight and a main lift.
+  // Tabs with nothing to show are skipped by the TV rotation.
   hasContent(tab) {
     if (tab === 'other' || tab === 'cardio') return Lifts.inGroup(tab).length > 0;
     if (tab === 'latest') return this.latestPrs().length > 0;
-    if (tab === 'bodyweight') return this.bodyweight && this.athletes.some((a) => Lifts.value(a, 'bw-total') > 0);
     return !!document.getElementById(`${tab}-tab`);
   }
 
@@ -450,7 +448,7 @@ class LeaderboardApp {
   }
 
   onTabKey(event) {
-    const tabs = [...document.querySelectorAll('.tab-btn:not([hidden])')];
+    const tabs = [...document.querySelectorAll('.tab-btn')];
     const index = tabs.indexOf(event.target);
     if (index < 0 || !['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
     event.preventDefault();
@@ -463,8 +461,7 @@ class LeaderboardApp {
   // --- tabs -----------------------------------------------------------------
   // remember: a visitor's choice becomes the URL hash, so board links can be shared.
   switchTab(tab, { remember = false } = {}) {
-    // A hidden tab (⚖️ Bodyweight while it's off) cannot be opened, not even by a link.
-    if (!document.getElementById(`${tab}-tab`) || document.getElementById(`tab-${tab}`).hidden) return;
+    if (!document.getElementById(`${tab}-tab`)) return;
     this.activeTab = tab;
     document.querySelector('.skip-link').setAttribute('href', `#${tab}-tab`);
     document.querySelectorAll('.tab-btn').forEach((b) => {
@@ -479,20 +476,21 @@ class LeaderboardApp {
     this.tv.onTabChange();
   }
 
-  // --- bodyweight boards --------------------------------------------------------
-  // Each viewer opts in to the ⚖️ Bodyweight tab, so a TV only rotates to it when it was
-  // turned on in that browser, or by ?bodyweight or a ?tabs list that names it.
+  // --- bodyweight ranking --------------------------------------------------------
+  // ⚖️ Bodyweight ranking swaps the boards for their bodyweight versions (see js/lifts.js).
+  // Each viewer opts in, so a TV only ranks by bodyweight when it was turned on in that
+  // browser or by ?bodyweight.
   bodyweightPreference(params = new URLSearchParams(location.search)) {
     let saved = false;
     try { saved = localStorage.getItem('lb.bodyweight') === '1'; } catch { /* Storage may be disabled. */ }
-    return saved || params.has('bodyweight') || this.tv.onlyTabs.includes('bodyweight');
+    return saved || params.has('bodyweight');
   }
 
+  // The next render draws the boards in this mode.
   applyBodyweight(on) {
     this.bodyweight = on;
     document.getElementById('bodyweightBtn').setAttribute('aria-pressed', String(on));
-    document.getElementById('tab-bodyweight').hidden = !on;
-    if (!on && this.activeTab === 'bodyweight') this.switchTab('lifts', { remember: true });
+    document.getElementById('bodyweightNote').hidden = !on;
   }
 
   toggleBodyweight() {
@@ -503,7 +501,7 @@ class LeaderboardApp {
     if (on) url.searchParams.set('bodyweight', '1'); else url.searchParams.delete('bodyweight');
     history.replaceState(null, '', url);
     this.applyBodyweight(on);
-    if (on) this.switchTab('bodyweight', { remember: true });
+    this.render();
   }
 
   // A phone's tab strip scrolls sideways: keep the selected tab in view.
@@ -523,7 +521,7 @@ class LeaderboardApp {
     document.getElementById('mineLiftFields').innerHTML = this.liftFields('mine');
     document.getElementById('adminLiftFields').innerHTML = this.liftFields('admin');
     document.getElementById('mineBodyweightField').innerHTML = this.bodyweightField('mineBodyweight',
-      'Optional. It puts you on the ⚖️ Bodyweight boards, and anyone can work it out from your ratios there. Saved straight away, without review; clear it to leave.');
+      'Optional. It ranks you when ⚖️ Bodyweight ranking is on, and anyone can work it out from your scores there. Saved straight away, without review; clear it to leave.');
     document.getElementById('adminBodyweightField').innerHTML = this.bodyweightField('adminBodyweight',
       'Members share this themselves in My PRs. Correct it, or clear it if they ask.');
   }
@@ -544,7 +542,7 @@ class LeaderboardApp {
       </fieldset>`)}`;
   }
 
-  // Opt-in bodyweight for the ⚖️ Bodyweight boards; a blank field means not shared.
+  // Opt-in bodyweight for ⚖️ Bodyweight ranking; a blank field means not shared.
   bodyweightField(id, note) {
     const { MIN, MAX } = Lifts.BODYWEIGHT;
     return html`<fieldset class="lift-fields">

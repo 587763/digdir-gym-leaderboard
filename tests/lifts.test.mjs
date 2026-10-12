@@ -104,3 +104,14 @@ test('bodyweight input takes kilograms with one decimal within the limits; blank
   assert.equal(Lifts.parseBodyweight(String(Lifts.BODYWEIGHT.MAX)), Lifts.BODYWEIGHT.MAX);
   for (const bad of ['29.9', '300.1', '80.25', '-80', 'eighty', '1e2', '80,5']) assert.ok(Number.isNaN(Lifts.parseBodyweight(bad)), bad);
 });
+test('bodyweight exercises score reps or hold time times bodyweight, and races are not adjusted', () => {
+  const a = athlete('A', {bodyweight: 80.5, lifts: {pullups: 12, deadhang: 95, run1k: 300}});
+  assert.equal(Lifts.value(a, 'bw-pullups'), 966);
+  assert.equal(Lifts.value(a, 'bw-deadhang'), 127);
+  assert.equal(Lifts.formatUnit('bw-pullups', 966), '966 kg');
+  assert.equal(Lifts.formatUnit('bw-deadhang', 127), '127 kg·min');
+  assert.equal(Lifts.value(athlete('B', {lifts: {pullups: 12}}), 'bw-pullups'), 0, 'no bodyweight, no score');
+  assert.equal(Lifts.bodyweightBoard('run1k'), undefined);
+  assert.deepEqual([...Lifts.bodyweightBoards.map((b) => b.base)],
+    [...Lifts.all.filter((e) => !e.lowerIsBetter).map((e) => e.id), 'total']);
+});

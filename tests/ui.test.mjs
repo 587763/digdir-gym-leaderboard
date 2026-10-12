@@ -71,3 +71,16 @@ test('bodyweight boards rank the ratio for athletes who shared a bodyweight', ()
   assert.match(podium, /data-id="Ada"[^]*fresh/, 'a fresh bench PR also marks the bench ratio');
   assert.match(String(BoardView.section('bw-total', ctx([athlete('Bo', { bench: 150 })]))), /Share your bodyweight in My PRs/);
 });
+test('bodyweight exercises multiply by bodyweight, and the run keeps its own board', () => {
+  const athletes = [athlete('Ada', { bodyweight: 60, lifts: { pullups: 15, deadhang: 120 } }), athlete('Bo', { bodyweight: 100, lifts: { pullups: 10, deadhang: 60 } })];
+  const other = String(BoardView.group('other', ctx(athletes, { bodyweight: true, podiumFits: false })));
+  assert.match(other, /Chill-ups × BW/);
+  assert.match(other, />kg</);
+  assert.ok(other.indexOf('>1000<') < other.indexOf('>900<'), 'Bo moved 1000 kg, Ada 900 kg');
+  assert.match(other, /Dead Hang × BW/);
+  assert.match(other, />kg·min</);
+  assert.match(other, />120</, 'Ada held 60 kg for two minutes');
+  const cardio = String(BoardView.group('cardio', ctx(athletes, { bodyweight: true })));
+  assert.match(cardio, /data-lift="run1k"/);
+  assert.ok(!cardio.includes('BW'));
+});

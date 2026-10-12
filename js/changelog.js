@@ -6,6 +6,15 @@
 // tests/changelog.test.mjs keeps the top entry in step with the app version.
 window.CHANGELOG = [
   {
+    version: '3.4.0',
+    date: '2026-10-12',
+    changes: [
+      '⚖️ Bodyweight ranking now re-ranks the boards you are looking at, instead of opening a tab of its own.',
+      'Lifts and the total are divided by bodyweight. Chill-ups, push-ups and dead hang are multiplied by it, since your body is the weight.',
+      'Cardio times stay as they are: running already costs about the same energy per kilogram for everyone.',
+    ],
+  },
+  {
     version: '3.3.0',
     date: '2026-10-12',
     changes: [

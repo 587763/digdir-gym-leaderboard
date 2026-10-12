@@ -18,7 +18,7 @@ const CHROME = process.env.CHROME || [
 ].find(existsSync);
 if (!CHROME) { console.error('Chrome not found; set CHROME=/path/to/chrome'); process.exit(2); }
 
-const TABS = ['lifts', 'total', 'bodyweight', 'other', 'cardio', 'latest', 'fun'];
+const TABS = ['lifts', 'total', 'other', 'cardio', 'latest', 'fun'];
 const DIALOGS = ['app.openMine()', 'app.openReview()', 'app.openMembers()', 'app.openAthletes()',
   "app.openAthleteEditor('athlete-1')", "app.openHistory('athlete-1')", "UI.dialogs.open('claimModal')", 'app.openChangelog()'];
 const SCREENS = [
@@ -160,14 +160,17 @@ let checks = 0;
 try {
   for (const screen of SCREENS) {
     for (const fixture of screen.fixtures) {
-      // The opt-in ⚖️ Bodyweight tab is turned on, so every check covers it too.
-      await chrome.open(`?fixture=${fixture}&bodyweight${screen.tv ? '&tv&rotate=120' : ''}`, screen.width, screen.height);
+      await chrome.open(`?fixture=${fixture}${screen.tv ? '&tv&rotate=120' : ''}`, screen.width, screen.height);
       // Freeze rotation so tabs change only when the check says so.
       if (screen.tv) await chrome.run('(() => { app.tv.scheduleTick = () => {}; app.tv.stop(); })()');
-      for (const tab of TABS) {
-        const problems = await chrome.run(`(() => { UI.dialogs.closeAll(); app.switchTab('${tab}'); scrollTo(0, 0); return ${screen.tv ? `[...${CHECK_PAGE}, ...${CHECK_TV}]` : CHECK_PAGE}; })()`);
-        checks++;
-        problems.forEach((p) => failures.push(`${screen.name} ${fixture} ${tab}: ${p}`));
+      // Every tab, ranked by ⚖️ bodyweight and then by weight lifted (the default the later checks expect).
+      for (const bodyweight of [true, false]) {
+        await chrome.run(`(() => { app.applyBodyweight(${bodyweight}); app.render(); })()`);
+        for (const tab of TABS) {
+          const problems = await chrome.run(`(() => { UI.dialogs.closeAll(); app.switchTab('${tab}'); scrollTo(0, 0); return ${screen.tv ? `[...${CHECK_PAGE}, ...${CHECK_TV}]` : CHECK_PAGE}; })()`);
+          checks++;
+          problems.forEach((p) => failures.push(`${screen.name} ${fixture} ${tab}${bodyweight ? ' (bodyweight)' : ''}: ${p}`));
+        }
       }
       if (fixture === 'admin' && screen.name === 'desktop') {
         (await chrome.run(CHECK_FOCUS)).forEach((p) => failures.push(`${screen.name} focus: ${p}`));

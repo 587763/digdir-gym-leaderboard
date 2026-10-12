@@ -5,7 +5,7 @@ import { application, athlete } from './helpers.mjs';
 test('unconfigured app still renders all tabs and explains the missing connection', async () => {
   const { app, document } = await application({configured:false});
   assert.ok(document.querySelector('.config-banner'));
-  assert.equal(document.querySelectorAll('.leaderboard-section').length, 13); // 7 exercises, total, 4 per bodyweight, latest
+  assert.equal(document.querySelectorAll('.leaderboard-section').length, 9); // 7 exercises, total, latest
   app.switchTab('cardio');
   assert.equal(document.getElementById('tab-cardio').getAttribute('aria-selected'), 'true');
   assert.equal(document.getElementById('signInBtn').disabled, true);
@@ -445,40 +445,39 @@ test('the claim dialog offers archived athletes to people coming back', async ()
   assert.equal(document.querySelector('#claimSelect > option[value="a"]').textContent,'Ada');
   assert.match(String(app.describeRequest({kind:'claim',athlete_id:'r',payload:{}})),/approving brings them back/);
 });
-test('the bodyweight tab is opt-in for each viewer and remembered', async () => {
-  const athletes=[athlete('a',{name:'Ada',bench:100,bodyweight:80}),athlete('b',{name:'Bo',bench:120})];
+test('bodyweight ranking re-ranks the boards in place for viewers who turn it on', async () => {
+  const athletes=[athlete('a',{name:'Ada',bench:100,bodyweight:80,lifts:{pullups:10,run1k:300}}),athlete('b',{name:'Bo',bench:120,lifts:{pullups:20,run1k:280}})];
   const {app,context,document}=await application({listAthletes:async()=>athletes});
-  const tab=document.getElementById('tab-bodyweight');
-  assert.equal(tab.hidden,true);
-  assert.equal(app.tv.rotationTabs().includes('bodyweight'),false);
-  app.switchTab('bodyweight');
-  assert.equal(app.activeTab,'lifts','a hidden tab cannot be opened');
-  app.switchTab('total');
-  app.onTabKey({target:document.getElementById('tab-total'),key:'ArrowRight',preventDefault(){}});
-  assert.equal(app.activeTab,'other','arrow keys skip the hidden tab');
+  const boards=()=>[...document.querySelectorAll('[data-board-group] [data-lift]')].map((s)=>s.dataset.lift);
+  assert.deepEqual(boards(),['squat','bench','deadlift','total','deadhang','pullups','pushups','run1k']);
+  app.switchTab('other');
   let saved;
   context.localStorage.setItem=(key,value)=>{saved=[key,value];};
   app.toggleBodyweight();
   assert.deepEqual(saved,['lb.bodyweight','1']);
-  assert.equal(tab.hidden,false);
-  assert.equal(app.activeTab,'bodyweight','turning it on shows it');
+  assert.equal(app.activeTab,'other','the visitor stays where they are');
   assert.equal(document.getElementById('bodyweightBtn').getAttribute('aria-pressed'),'true');
-  // Only athletes who shared a bodyweight are ranked.
-  assert.deepEqual([...document.querySelectorAll('[data-lift="bw-bench"] [data-action="history"]')].map((b)=>b.dataset.id),['a']);
+  assert.equal(document.getElementById('bodyweightNote').hidden,false);
+  assert.deepEqual(boards(),['bw-squat','bw-bench','bw-deadlift','bw-total','bw-deadhang','bw-pullups','bw-pushups','run1k'],'the run is not adjusted');
+  // Only athletes who shared a bodyweight are ranked; reps are multiplied by it.
+  assert.deepEqual([...document.querySelectorAll('[data-lift="bw-pullups"] [data-action="history"]')].map((b)=>b.dataset.id),['a']);
+  assert.match(document.querySelector('[data-lift="bw-pullups"]').textContent,/800 kg/);
+  assert.equal(document.querySelectorAll('[data-lift="run1k"] [data-action="history"]').length,2);
   app.toggleBodyweight();
   assert.deepEqual(saved,['lb.bodyweight','0']);
-  assert.equal(tab.hidden,true);
-  assert.equal(app.activeTab,'lifts','turning it off leaves the tab');
+  assert.equal(document.getElementById('bodyweightNote').hidden,true);
+  assert.deepEqual(boards(),['squat','bench','deadlift','total','deadhang','pullups','pushups','run1k']);
   context.localStorage.getItem=(key)=>key==='lb.bodyweight'?'1':null;
   assert.equal(app.bodyweightPreference(),true,'the choice survives a reload');
 });
-test('a TV rotates to the bodyweight boards only when they were turned on and someone shared a bodyweight', async () => {
-  const shared=async()=>[athlete('a',{bench:100,bodyweight:80})];
-  const rotation=async(search,listAthletes=shared)=>[...(await application({listAthletes},{search})).app.tv.rotationTabs()];
-  assert.equal((await rotation('?tv')).includes('bodyweight'),false);
-  assert.deepEqual(await rotation('?tv&bodyweight'),['lifts','total','bodyweight','other','cardio','fun']);
-  assert.deepEqual(await rotation('?tv&tabs=bodyweight,total'),['total','bodyweight'],'naming it in ?tabs turns it on');
-  assert.equal((await rotation('?tv&bodyweight',async()=>[athlete('a',{bench:100})])).includes('bodyweight'),false);
+test('a TV ranks by bodyweight only when it was turned on', async () => {
+  const listAthletes=async()=>[athlete('a',{bench:100,bodyweight:80})];
+  const tv=await application({listAthletes},{search:'?tv'});
+  assert.ok(tv.document.querySelector('[data-lift="bench"]'));
+  assert.equal(tv.document.querySelector('[data-lift^="bw-"]'),null);
+  const on=await application({listAthletes},{search:'?tv&bodyweight'});
+  assert.ok(on.document.querySelector('[data-lift="bw-bench"]'));
+  assert.deepEqual([...on.app.tv.rotationTabs()],['lifts','total','other','cardio','fun'],'the same tabs rotate either way');
 });
 test('members share and clear their bodyweight in My PRs at once, without a review', async () => {
   const me=athlete('me',{bench:100});

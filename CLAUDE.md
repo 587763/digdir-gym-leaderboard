@@ -43,11 +43,14 @@ Live: https://587763.github.io/digdir-gym-leaderboard/ · Origin: `587763/digdir
   `lifts` JSONB map) and pure `Lifts` rules: parse/format/rank/value/improves. Numeric-string
   totals summed in tenths, competition ranks (1, 1, 3), zero means no entry. Times accept
   `m:ss`, `m.ss`/`m,ss` (phone keypads) or whole seconds; invalid input returns `NaN`.
-  `bodyweightBoards` are computed pseudo-exercises (`bw-squat`, `bw-bench`, `bw-deadlift`,
-  `bw-total`; unit `ratio`, never stored, and `-` keeps them apart from stored keys): the
-  lift ÷ `athletes.bodyweight`, rounded to the hundredths shown so equal ratios tie; zero
-  (off the board) without a bodyweight. `parseBodyweight`: blank → null (not shared), kg
-  with one decimal within `BODYWEIGHT` (30–300, matching SQL), otherwise `NaN`.
+  `bodyweightBoards` are computed pseudo-exercises (`bw-<id>`, never stored; `-` keeps them
+  apart from stored keys), one per exercise and the total, except races (`lowerIsBetter`)
+  and exercises marked `bodyweight: false`. `kg` → `bw-ratio` (score ÷ bodyweight, hundredths,
+  `1.52×`); `reps` → `bw-reps` (× bodyweight, whole kg); `time` → `bw-time` (seconds ×
+  bodyweight ÷ 60, whole kg·min). Scores round to what is shown so equal scores tie; zero
+  (off the board) without a bodyweight. `bodyweightBoard(id)` finds the version of a board.
+  `parseBodyweight`: blank → null (not shared), kg with one decimal within `BODYWEIGHT`
+  (30–300, matching SQL), otherwise `NaN`.
 - `js/avatar.js`: deterministic name-derived SVG figures; `{ decorative: true }` hides a
   figure from screen readers when its name is visible next to it.
 - `js/store.js`: auth, reads (explicit columns), governed writes, admin writes and realtime.
@@ -59,7 +62,9 @@ Live: https://587763.github.io/digdir-gym-leaderboard/ · Origin: `587763/digdir
   corrections are called out when the board differs from the last verified value.
 - `js/board.js`: pure `BoardView` for boards, podiums, medals, the Latest feed and the Hall of
   Fame. Markers: ⏳ pending change, 🔥 PR verified in the last 7 days (on a bodyweight board,
-  in its base lift), highlighter on your rows. Group `bodyweight` renders the four ratio boards.
+  in the exercise it adjusts), highlighter on your rows. With `ctx.bodyweight`, `group()`
+  swaps each board for its bodyweight version; the title says how (`/ BW` or `× BW`) and the
+  score column names the unit.
 - `js/tv.js`: `TvDisplay` rotation, dwell, podium/Hall of Fame fitting and paging.
 - `js/app.js`: controller: state, serialized/coalesced refreshes with a 20 s read timeout,
   identity generation checks, one delegated `data-action` dispatcher (`runAction` marks async
@@ -67,10 +72,10 @@ Live: https://587763.github.io/digdir-gym-leaderboard/ · Origin: `587763/digdir
   members and athletes. Reconciles every 60 s while visible and on online/focus. A refresh
   re-renders only when what it would draw differs from what is shown (`boardSnapshot()`,
   including relative-time labels), so unchanged refreshes preserve focused controls and open
-  dialogs while "just now" still ages. `app.ready` resolves after init. The ⚖️ Bodyweight tab
-  is a per-viewer opt-in (`app.bodyweight`): the header toggle persists it in
-  `localStorage['lb.bodyweight']` and mirrors it in `?bodyweight=1`; while it is off the tab
-  button is `hidden`, `switchTab` refuses it, arrow keys skip it and the TV rotation leaves it out.
+  dialogs while "just now" still ages. `app.ready` resolves after init. ⚖️ Bodyweight ranking
+  is a per-viewer mode (`app.bodyweight`), not a tab: the header toggle persists it in
+  `localStorage['lb.bodyweight']`, mirrors it in `?bodyweight=1`, shows `#bodyweightNote`
+  and re-renders the boards in place.
 - `supabase/schema.sql`: destructive fresh-install schema + seed. Never run against production.
 - `supabase/migrations/`: hand-applied live upgrades. 0001 superseded; 0002 governance;
   0003 extra lifts; 0004 public history; 0005 validation and decision hardening; 0006 member
@@ -83,8 +88,8 @@ Live: https://587763.github.io/digdir-gym-leaderboard/ · Origin: `587763/digdir
   protocol (`CHROME=` overrides detection). Asserts no horizontal overflow, scores inside their
   boards, TV never scrolls and every ranked row renders on screen on some page, dialogs open
   cleanly, table text stays in its cells, the selected tab is visible, focus survives a
-  re-render, and a quiet console. Fixtures load with `&bodyweight`, so every check covers the
-  Bodyweight tab. Assert containment, not pixels (fonts differ by machine).
+  re-render, and a quiet console. Every tab is checked ranked by bodyweight and by weight
+  lifted. Assert containment, not pixels (fonts differ by machine).
 - `tests/`: Node tests, LinkeDOM UI tests (with `<dialog>` and innerHTML shims in helpers),
   PGlite Postgres/RLS tests, isolated browser fixtures (`tests/browser-store.js`).
 - `.github/workflows/deploy.yml`: tests PRs and main; deploys main only after both `npm test`
@@ -108,7 +113,7 @@ Local-only fixtures: `/?fixture=admin` (signed-in admin with a pending PR, a pen
 claim, a blocked member and an archived athlete), `returning` (a member whose athlete was
 archived; shows the welcome-back banner), `empty`, `error`, `large` (65 athletes), or `layout`
 (long medalist names and maximum scores). Fixture athletes share bodyweights except every
-third; add `&bodyweight` to show their boards. TV fixture labels do not consume board height. The dev
+third; add `&bodyweight` to rank by them. TV fixture labels do not consume board height. The dev
 server replaces Store with `tests/browser-store.js` and removes the Supabase CDN script.
 Writes stay in memory. Use `?fixture=large&tv&rotate=120` for TV layout inspection.
 Fixture controls/data are never included in the deployed artifact.
@@ -158,9 +163,9 @@ Fixture controls/data are never included in the deployed artifact.
 Enable with `?tv` or the header toggle (hidden on phones). State is persisted defensively in
 `localStorage['lb.tv']`. `?rotate=<seconds>` sets a 5–120 s target budget per tab, default 15.
 `?tabs=lifts,total` limits the rotation (the display starts on a chosen tab and never pages
-through others); empty tabs (e.g. Latest with no PRs) are skipped. The Bodyweight tab joins the
-rotation only when turned on (`?bodyweight`, `?tabs=` naming it, or the viewer's saved toggle)
-and someone is ranked on it. The header toggle is hidden on TV.
+through others); empty tabs (e.g. Latest with no PRs) are skipped. The TV ranks by bodyweight
+only when turned on (`?bodyweight` or that browser's saved toggle); the same tabs rotate either
+way, and the header toggle and mode note are hidden on TV.
 Multi-page tabs give page one double the dwell of later pages. Later pages get at least 5 s
 (page one 10 s), extending the target for large rosters; a single page still respects 5 s.
 Opening a dialog stops rotation and closing it starts a fresh dwell. Hiding the page pauses
@@ -176,10 +181,6 @@ still advances. A PR verified while the board is open gets a celebration banner.
   `TvDisplay.PAGE_PAD` reserves 48px for the dots.
 - Refits after render, tab switches, fonts loading and resize; changing page counts restarts
   the rotation clock so late data does not leave a stale countdown.
-- `fit()` pages rows within one row of boards, so the Bodyweight tab's four boards sit side by
-  side on TV. Below ~1565px wide (where the root's 18px minimum applies) their lettering and
-  columns scale with `--bw-scale` (`min(1rem, 1.15vw)`) and the tab strip tightens, so 720p
-  keeps one tab row and unbroken names.
 - Connection warnings and Retry remain visible in the TV footer reserve.
 
 ## Extending
@@ -189,8 +190,8 @@ still advances. A PR verified while the board is open gets a celebration banner.
   history and the Latest feed follow. No schema change for reps/time; a `kg` extra exercise
   must also be listed in SQL `lift_allows_decimals()` via a migration (a test enforces this).
 - Main lift: requires a fixed column, a migration, and the registry entry with group `main`.
-  It also gets a bodyweight board; the TV fits four bodyweight boards in a row, so a fourth
-  main lift needs a new TV layout for that tab.
+- Every exercise gets a bodyweight version by its unit (races excepted). Set `bodyweight: false`
+  on a reps or time exercise where the body isn't the weight moved (e.g. a kettlebell count).
 - Preserve unknown extra-lift keys and unregistered achievements on admin edits; My PRs
   must not remove achievements absent from the form.
 - New board tab: a tab button + panel with `data-board-group` in `index.html`, a group in
