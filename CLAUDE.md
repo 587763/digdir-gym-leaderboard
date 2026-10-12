@@ -198,9 +198,9 @@ still advances. A PR verified while the board is open gets a celebration banner.
 
 ## Database upgrades and deployment
 Apply migrations in order through the Supabase SQL Editor before deploying the frontend that
-needs them; production has 0002–0007 (0001 was superseded). Since 3.2 the frontend selects
-`athletes.archived_at`, so it cannot load boards on a database without 0007; 3.3 also selects
-`athletes.bodyweight`, so apply 0008 before deploying it. Migrations are
+needs them; production has 0002–0008 (0001 was superseded; 0008 applied 12 October 2026).
+The frontend selects `athletes.archived_at` (since 3.2, 0007) and `athletes.bodyweight` (since
+3.3, 0008), so it cannot load boards on a database without them. Migrations are
 transactional and idempotent and rewrite no rows; 0006 stops with a named athlete if a
 stored value breaks its unit. Tests execute migrations in local Postgres (PGlite). Check the
 backup workflow ran recently before applying one (see Backups).
