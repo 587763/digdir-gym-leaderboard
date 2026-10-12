@@ -38,3 +38,10 @@ test('admin edits compare the opening timestamp and report concurrent changes',a
   await assert.rejects(()=>store.adminUpdateAthlete('athlete',{name:'New'},'2026-01-01'),/changed or your access expired/);
   assert.deepEqual(filters,[['id','athlete'],['updated_at','2026-01-01']]);
 });
+test('bodyweight is saved through its RPC and failures propagate',async()=>{
+  const calls=[];
+  const store=storeWith({rpc:async(name,args)=>{calls.push([name,{...args}]);return {error:calls.length>1?new Error('denied'):null};}});
+  await store.setMyBodyweight(82.5);
+  await assert.rejects(()=>store.setMyBodyweight(null),/denied/);
+  assert.deepEqual(calls,[['set_my_bodyweight',{p_bodyweight:82.5}],['set_my_bodyweight',{p_bodyweight:null}]]);
+});

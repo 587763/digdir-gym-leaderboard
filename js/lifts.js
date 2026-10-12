@@ -27,13 +27,21 @@ window.Lifts = (() => {
   const main = all.filter((e) => e.group === 'main').map((e) => e.id);
   const extra = all.filter((e) => e.group !== 'main');
   const TOTAL = { id: 'total', emoji: '🏆', label: 'Total', unit: 'kg', group: 'total' };
+  // Opt-in ⚖️ Bodyweight boards: each main lift and the total again, ranked by kilograms
+  // lifted per kilogram of shared bodyweight. Never stored, and the '-' in their ids keeps
+  // them apart from stored exercise keys. Bodyweight is kg with one decimal, within BODYWEIGHT.
+  const BODYWEIGHT = { MIN: 30, MAX: 300 };
+  const bodyweightBoards = [...main, 'total'].map((base) => {
+    const { emoji, label } = base === 'total' ? TOTAL : all.find((e) => e.id === base);
+    return { id: `bw-${base}`, base, emoji, label, unit: 'ratio', group: 'bodyweight' };
+  });
   // Form sections and tabs, in display order.
   const groups = [
     { id: 'main', emoji: '🏋️', label: 'Main lifts' },
     { id: 'other', emoji: '🤸', label: 'Other lifts' },
     { id: 'cardio', emoji: '🏃', label: 'Cardio' },
   ];
-  const get = (id) => id === 'total' ? TOTAL : all.find((e) => e.id === id);
+  const get = (id) => id === 'total' ? TOTAL : all.find((e) => e.id === id) || bodyweightBoards.find((e) => e.id === id);
   const inGroup = (group) => all.filter((e) => e.group === group);
   const unit = (id) => get(id)?.unit || 'kg';
 
@@ -57,10 +65,20 @@ window.Lifts = (() => {
   const value = (athlete, id) => id === 'total'
     // Sum integer tenths so equal decimal totals also share an exact rank.
     ? main.reduce((sum, lift) => sum + Math.round(number(athlete[lift]) * 10), 0) / 10
+    : unit(id) === 'ratio' ? ratio(athlete, get(id).base)
     : number(main.includes(id) ? athlete[id] : athlete.lifts?.[id]);
+  // The athlete's shared bodyweight in kg, or null when they haven't shared one.
+  const bodyweight = (athlete) => number(athlete?.bodyweight) || null;
+  // Kilograms lifted per kilogram of bodyweight, rounded to the hundredths that are shown,
+  // so equal ratios share a rank. Zero (off the board) without a shared bodyweight.
+  const ratio = (athlete, base) => {
+    const weight = bodyweight(athlete);
+    return weight ? Math.round((value(athlete, base) * 100) / weight) / 100 : 0;
+  };
   const format = (id, raw) => unit(id) === 'time' ? formatTime(raw)
-    : unit(id) === 'reps' ? String(Math.round(number(raw))) : number(raw).toFixed(1);
-  const formatUnit = (id, raw) => format(id, raw) + (unit(id) === 'time' ? '' : ` ${unit(id)}`);
+    : unit(id) === 'reps' ? String(Math.round(number(raw)))
+    : unit(id) === 'ratio' ? `${number(raw).toFixed(2)}×` : number(raw).toFixed(1);
+  const formatUnit = (id, raw) => format(id, raw) + ({ time: '', ratio: ' BW' }[unit(id)] ?? ` ${unit(id)}`);
   // Signed change in the exercise's unit: "+12.5 kg", "−0:08", "+3 reps".
   const formatDelta = (id, delta) => {
     const sign = delta > 0 ? '+' : delta < 0 ? '−' : '';
@@ -103,7 +121,15 @@ window.Lifts = (() => {
   // Stored value → the text a form field shows; blank means "no entry".
   const inputValue = (id, raw) => number(raw) <= 0 ? '' : unit(id) === 'time' ? formatTime(raw) : String(number(raw));
   const unitHint = (id) => ({ kg: 'kg', reps: 'reps', time: 'm:ss' })[unit(id)];
+  // Form input → bodyweight in kg, null when left blank (not shared), or NaN when invalid.
+  const parseBodyweight = (input) => {
+    const raw = String(input ?? '').trim();
+    if (!raw) return null;
+    const n = /^\d+(?:\.\d+)?$/.test(raw) ? Number(raw) : NaN;
+    if (!(n >= BODYWEIGHT.MIN && n <= BODYWEIGHT.MAX) || Math.abs(n * 10 - Math.round(n * 10)) > 0.000001) return NaN;
+    return n;
+  };
 
-  return { MAX, all, main, extra, groups, get, inGroup, unit, value, format, formatUnit, formatDelta,
-    improves, ranked, parse, inputValue, unitHint, formatTime, parseTime };
+  return { MAX, BODYWEIGHT, all, main, extra, groups, bodyweightBoards, get, inGroup, unit, value, bodyweight, format,
+    formatUnit, formatDelta, improves, ranked, parse, parseBodyweight, inputValue, unitHint, formatTime, parseTime };
 })();

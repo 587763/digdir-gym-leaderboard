@@ -8,7 +8,8 @@
 -- requests, and at least one working admin always remains. Archived athletes leave the
 -- boards but keep their history; an admin, an approved claim or their linked member
 -- restores them, and only deleting one erases it. Deleting a member's account keeps the
--- requests they made. Enforced by RLS + functions.
+-- requests they made. Members may share their bodyweight for the per-bodyweight boards and
+-- clear it again, without review. Enforced by RLS + functions.
 
 -- ───────────────────────────────────────────────────────────────────────────
 -- Athletes (the board)
@@ -25,6 +26,7 @@ create table public.athletes (
   deadlift     numeric(6,1) not null default 0 check (deadlift >= 0),
   lifts        jsonb not null default '{}'::jsonb,   -- "other lifts" map: lift_id -> value (see js/lifts.js)
   achievements text[] not null default '{}',
+  bodyweight   numeric(4,1) check (bodyweight between 30 and 300),  -- opt-in, kg; null = off the bodyweight boards
   avatar       jsonb not null default '{}'::jsonb,   -- reserved (future avatar customizer)
   created_at   timestamptz not null default now(),
   updated_at   timestamptz not null default now(),
@@ -394,6 +396,22 @@ begin
   if not found then raise exception 'athlete not found'; end if;
   update public.athletes set archived_at = null where id = prof.athlete_id and archived_at is not null;
   return prof.athlete_id;
+end; $$;
+
+-- A member linked to an athlete sets their own bodyweight, or clears it with null.
+create or replace function public.set_my_bodyweight(p_bodyweight numeric)
+returns void language plpgsql security definer set search_path = public as $$
+declare uid uuid := auth.uid(); prof public.profiles;
+begin
+  if uid is null then raise exception 'not authenticated'; end if;
+  select * into prof from public.profiles where user_id = uid;
+  if not found then raise exception 'no profile'; end if;
+  if prof.status = 'blocked' then raise exception 'your account is blocked'; end if;
+  if prof.athlete_id is null then raise exception 'you are not linked to an athlete'; end if;
+  if p_bodyweight not between 30 and 300 or p_bodyweight <> round(p_bodyweight, 1) then
+    raise exception 'bodyweight must be between 30 and 300 kg, with at most one decimal';
+  end if;
+  update public.athletes set bodyweight = p_bodyweight where id = prof.athlete_id;
 end; $$;
 
 create index if not exists proposals_pending_created on public.proposals(created_at) where status = 'pending';

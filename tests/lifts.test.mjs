@@ -83,3 +83,24 @@ test('improvements respect the direction of each exercise', () => {
   assert.equal(Lifts.improves('run1k', 300, 0), false);
   assert.equal(Lifts.formatDelta('run1k', -8), '−0:08');
 });
+test('bodyweight ratios rank the hundredths shown, tie equal ratios and leave out unshared weights', () => {
+  const rows = Lifts.ranked([
+    athlete('A', {squat: 100, bodyweight: 80}),
+    athlete('B', {squat: 125, bodyweight: 100}),
+    athlete('C', {squat: 150, bodyweight: 100.5}),
+    athlete('D', {squat: 200}),
+    athlete('E', {bodyweight: 70}),
+  ], 'bw-squat');
+  assert.deepEqual(Array.from(rows, (r) => [r.athlete.name, r.value, r.rank]), [['C',1.49,1],['A',1.25,2],['B',1.25,2]]);
+  assert.equal(Lifts.value(athlete('T', {squat:'120', bench:'100', deadlift:'150.5', bodyweight:'87.5'}), 'bw-total'), 4.23);
+  assert.equal(Lifts.format('bw-squat', 1.5), '1.50×');
+  assert.equal(Lifts.formatUnit('bw-total', 4.23), '4.23× BW');
+  assert.equal(Lifts.bodyweight(athlete('D')), null);
+});
+test('bodyweight input takes kilograms with one decimal within the limits; blank means not shared', () => {
+  assert.equal(Lifts.parseBodyweight(''), null);
+  assert.equal(Lifts.parseBodyweight(' 82.5 '), 82.5);
+  assert.equal(Lifts.parseBodyweight(String(Lifts.BODYWEIGHT.MIN)), Lifts.BODYWEIGHT.MIN);
+  assert.equal(Lifts.parseBodyweight(String(Lifts.BODYWEIGHT.MAX)), Lifts.BODYWEIGHT.MAX);
+  for (const bad of ['29.9', '300.1', '80.25', '-80', 'eighty', '1e2', '80,5']) assert.ok(Number.isNaN(Lifts.parseBodyweight(bad)), bad);
+});

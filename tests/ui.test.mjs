@@ -15,10 +15,11 @@ test('html templates escape every interpolation unless it is already safe markup
 });
 
 test('every board view escapes athlete names', () => {
-  const a = athlete('x', { name: EVIL, bench: 100, achievements: ['gripper90kg'], lifts: { run1k: 300 } });
+  const a = athlete('x', { name: EVIL, bench: 100, bodyweight: 80, achievements: ['gripper90kg'], lifts: { run1k: 300 } });
   const views = [
     BoardView.section('bench', ctx([a])),                                          // podium
     BoardView.section('bench', ctx([a], { podiumFits: false })),                   // table row
+    BoardView.section('bw-bench', ctx([a])),                                       // per bodyweight
     BoardView.hallOfFame(ctx([a])), BoardView.hallOfFame(ctx([a], { hallTable: true })),
     BoardView.latest(ctx([a], { latest: [{ id: 'p', athlete: a, lift: 'run1k', value: 300, previous: 320, at: '2026-01-01' }] })),
   ].map(String);
@@ -56,4 +57,17 @@ test('relative times read naturally', () => {
 test('the latest feed reports a failed load instead of an empty board', () => {
   assert.match(String(BoardView.latest(ctx([], { error: true }))), /unavailable/);
   assert.match(String(BoardView.latest(ctx([], { loading: true }))), /Loading/);
+});
+
+test('bodyweight boards rank the ratio for athletes who shared a bodyweight', () => {
+  const athletes = [athlete('Ada', { bench: 100, bodyweight: 80 }), athlete('Bo', { bench: 150 }), athlete('Cy', { bench: 90, bodyweight: 60 })];
+  const table = String(BoardView.section('bw-bench', ctx(athletes, { podiumFits: false })));
+  assert.match(table, /Bench Press \/ BW/);
+  assert.match(table, />× BW</);
+  assert.ok(table.indexOf('1.50×') < table.indexOf('1.25×'), 'higher ratio first');
+  assert.ok(!table.includes('data-id="Bo"'), 'no bodyweight, no ratio');
+  const podium = String(BoardView.section('bw-bench', ctx(athletes, { fresh: new Map([['Ada:bench', new Date().toISOString()]]) })));
+  assert.match(podium, /1\.50× BW/);
+  assert.match(podium, /data-id="Ada"[^]*fresh/, 'a fresh bench PR also marks the bench ratio');
+  assert.match(String(BoardView.section('bw-total', ctx([athlete('Bo', { bench: 150 })]))), /Share your bodyweight in My PRs/);
 });

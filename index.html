@@ -13,7 +13,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Permanent+Marker&family=Caveat:wght@400;600;700&family=Indie+Flower&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="styles.css?v=3.2.0">
+  <link rel="stylesheet" href="styles.css?v=3.3.0">
 </head>
 <body>
   <svg class="svg-defs" width="0" height="0" aria-hidden="true">
@@ -39,6 +39,7 @@
           <p class="subtitle">Good lifts. Great company. A little friendly competition.</p>
         </div>
         <div class="header-actions">
+          <button type="button" id="bodyweightBtn" class="btn btn-ghost bodyweight-toggle" data-action="toggle-bodyweight" aria-pressed="false" title="Also rank kilograms lifted per kilogram of bodyweight, for athletes who share theirs">⚖️ Bodyweight ranking</button>
           <button type="button" id="tvModeBtn" class="btn btn-ghost tv-toggle" data-action="toggle-tv" title="Big-screen / TV display — full screen, auto-cycles tabs">📺 TV mode</button>
           <div id="authArea" class="auth-area"></div>
         </div>
@@ -58,12 +59,16 @@
 
     <div class="board-meta">
       <div class="connection-status"><span id="boardStatus" role="status" data-state="idle">Opening the record book…</span><button type="button" id="retryBtn" class="btn btn-ghost" data-action="retry" hidden>Try again</button></div>
-      <span id="athleteCount"></span>
+      <div class="board-meta-end">
+        <span id="athleteCount"></span>
+        <button type="button" id="changelogBtn" class="changelog-link" data-action="open-changelog">✨ What's new in <span id="changelogVersion"></span></button>
+      </div>
     </div>
 
     <div class="tab-navigation" role="tablist" aria-label="Leaderboards">
       <button type="button" class="tab-btn active" data-tab="lifts" id="tab-lifts" role="tab" aria-controls="lifts-tab" aria-selected="true" tabindex="0"><span class="tab-icon" aria-hidden="true">🏋️</span>Main Lifts</button>
       <button type="button" class="tab-btn" data-tab="total" id="tab-total" role="tab" aria-controls="total-tab" aria-selected="false" tabindex="-1"><span class="tab-icon" aria-hidden="true">🏆</span>Total</button>
+      <button type="button" class="tab-btn" data-tab="bodyweight" id="tab-bodyweight" role="tab" aria-controls="bodyweight-tab" aria-selected="false" tabindex="-1" hidden><span class="tab-icon" aria-hidden="true">⚖️</span>Bodyweight</button>
       <button type="button" class="tab-btn" data-tab="other" id="tab-other" role="tab" aria-controls="other-tab" aria-selected="false" tabindex="-1"><span class="tab-icon" aria-hidden="true">🤸</span>Other Lifts</button>
       <button type="button" class="tab-btn" data-tab="cardio" id="tab-cardio" role="tab" aria-controls="cardio-tab" aria-selected="false" tabindex="-1"><span class="tab-icon" aria-hidden="true">🏃</span>Cardio</button>
       <button type="button" class="tab-btn" data-tab="latest" id="tab-latest" role="tab" aria-controls="latest-tab" aria-selected="false" tabindex="-1"><span class="tab-icon" aria-hidden="true">🔥</span>Latest</button>
@@ -83,6 +88,7 @@
                 <input type="text" maxlength="80" id="athleteName" required autocomplete="off" autofocus>
               </div>
               <div id="adminLiftFields"></div>
+              <div id="adminBodyweightField"></div>
               <h3 class="form-section-title">🏅 Achievements</h3>
               <div id="achievementFields" class="achievement-fields"></div>
             </div>
@@ -142,7 +148,7 @@
       <div class="modal-content" tabindex="-1" autofocus>
         <button type="button" class="close" data-action="close-dialog" aria-label="Close dialog">&times;</button>
         <h2 id="mineTitle">🏋️ My PRs</h2>
-        <p class="modal-intro">A peer verifies every PR and achievement. Name changes need an admin. Only changed fields are sent.</p>
+        <p class="modal-intro">A peer verifies every PR and achievement. Name changes need an admin. Your bodyweight is yours to share or clear. Only changed fields are sent.</p>
         <div id="minePending" class="own-requests" hidden></div>
         <form id="mineForm">
           <div class="form-group">
@@ -150,6 +156,7 @@
             <input type="text" required maxlength="80" id="mineName" autocomplete="off">
           </div>
           <div id="mineLiftFields"></div>
+          <div id="mineBodyweightField"></div>
           <h3 class="form-section-title">🏅 Achievements</h3>
           <div id="mineAchievementFields" class="achievement-fields"></div>
           <div class="form-actions">
@@ -190,6 +197,16 @@
       </div>
     </dialog>
 
+    <!-- Public changelog: releases from js/changelog.js, newest first -->
+    <dialog id="changelogModal" class="modal" aria-labelledby="changelogTitle">
+      <div class="modal-content" tabindex="-1" autofocus>
+        <button type="button" class="close" data-action="close-dialog" aria-label="Close dialog">&times;</button>
+        <h2 id="changelogTitle">✨ What's new</h2>
+        <p class="modal-intro">What changed on the leaderboard, newest first.</p>
+        <div id="changelogBody" class="changelog"></div>
+      </div>
+    </dialog>
+
     <!-- Leaderboards: sections are generated from the exercise registry (js/lifts.js) -->
     <div class="tab-content active" id="lifts-tab" role="tabpanel" aria-labelledby="tab-lifts" tabindex="-1">
       <div class="leaderboards" data-board-group="main"></div>
@@ -198,6 +215,12 @@
 
     <div class="tab-content" id="total-tab" role="tabpanel" aria-labelledby="tab-total" tabindex="-1">
       <div class="leaderboards" data-board-group="total"></div>
+    </div>
+
+    <!-- Opt-in for each viewer (⚖️ Bodyweight ranking); a TV only rotates here when it is on -->
+    <div class="tab-content" id="bodyweight-tab" role="tabpanel" aria-labelledby="tab-bodyweight" tabindex="-1">
+      <div class="leaderboards" data-board-group="bodyweight"></div>
+      <p class="hint">Kilograms lifted per kilogram of bodyweight. Only athletes who share their bodyweight in My PRs are ranked here.</p>
     </div>
 
     <div class="tab-content" id="other-tab" role="tabpanel" aria-labelledby="tab-other" tabindex="-1">
@@ -224,15 +247,16 @@
     src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.107.0/dist/umd/supabase.js"
     integrity="sha384-CQbEv3UOeYwlaBLdPF5KqEagCP39Q1KpvJC6Gwa3UGjZAwMvpA+0TFxSSnrgb4MX"
     crossorigin="anonymous"></script>
-  <script src="js/config.js?v=3.2.0"></script>
-  <script src="js/ui.js?v=3.2.0"></script>
-  <script src="js/achievements.js?v=3.2.0"></script>
-  <script src="js/lifts.js?v=3.2.0"></script>
-  <script src="js/avatar.js?v=3.2.0"></script>
-  <script src="js/store.js?v=3.2.0"></script>
-  <script src="js/history.js?v=3.2.0"></script>
-  <script src="js/board.js?v=3.2.0"></script>
-  <script src="js/tv.js?v=3.2.0"></script>
-  <script src="js/app.js?v=3.2.0"></script>
+  <script src="js/config.js?v=3.3.0"></script>
+  <script src="js/ui.js?v=3.3.0"></script>
+  <script src="js/achievements.js?v=3.3.0"></script>
+  <script src="js/changelog.js?v=3.3.0"></script>
+  <script src="js/lifts.js?v=3.3.0"></script>
+  <script src="js/avatar.js?v=3.3.0"></script>
+  <script src="js/store.js?v=3.3.0"></script>
+  <script src="js/history.js?v=3.3.0"></script>
+  <script src="js/board.js?v=3.3.0"></script>
+  <script src="js/tv.js?v=3.3.0"></script>
+  <script src="js/app.js?v=3.3.0"></script>
 </body>
 </html>

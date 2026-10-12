@@ -2,9 +2,9 @@
 
 A digital version of our office gym whiteboard — squat / bench / deadlift personal
 records, a combined total, podiums, "other lifts" (a timed dead hang, push-up & pull-up
-counts), a Cardio tab (e.g. a fastest 1 km), a feed of the latest verified PRs,
-per-athlete progression charts, and a Hall of Fame for fun achievements. Hand-drawn
-whiteboard look; the board updates live across everyone's screens.
+counts), a Cardio tab (e.g. a fastest 1 km), optional bodyweight rankings, a feed of the
+latest verified PRs, per-athlete progression charts, and a Hall of Fame for fun
+achievements. Hand-drawn whiteboard look; the board updates live across everyone's screens.
 
 **Live:** https://587763.github.io/digdir-gym-leaderboard/
 
@@ -14,13 +14,21 @@ whiteboard look; the board updates live across everyone's screens.
   peer-verified PR over time. Direct admin edits are not part of that history.
 - **Latest** lists the newest verified PRs with how much they improved; 🔥 marks a
   record set in the last week, and a PR verified while you watch gets a little cheer.
+- **⚖️ Bodyweight ranking** (the header button) adds a Bodyweight tab: squat, bench,
+  deadlift and total divided by bodyweight (`1.52×` means 1.52 times your bodyweight), for
+  athletes who choose to share theirs. It's off until you turn it on, and your browser
+  remembers the choice.
+- **✨ What's new** (above the tabs) lists what changed in each release, with a dot until
+  you've seen the latest one.
 - Tab links can be shared: add `#total`, `#cardio`, `#latest` and so on to the URL.
 - **Putting it on a TV?** Open the board with `?tv` (e.g. the live URL + `?tv`), or hit
   the **📺 TV mode** button. You get a full-screen landscape layout that auto-cycles
   through the tabs hands-free — and pauses while the browser tab is off-screen, so it
   plays nicely with a screen that rotates between several pages. A big roster is paged
   through automatically. Add `&rotate=20` to change the target seconds per tab (default
-  15), and `&tabs=lifts,total,latest` to show only some tabs. Large rosters extend that time so every page gets at least five seconds to read;
+  15), and `&tabs=lifts,total,latest` to show only some tabs. The bodyweight boards are
+  never in the rotation unless you ask for them: add `&bodyweight` (or name `bodyweight`
+  in `&tabs=`), or turn them on in that browser before starting TV mode. Large rosters extend that time so every page gets at least five seconds to read;
   the first page gets double the time. Podium steps scale with their numbers when Chrome
   zoom changes, and crowded screens use complete ranked tables when podiums leave too
   little room. Connection trouble stays visible, and the board checks for missed updates
@@ -37,6 +45,10 @@ witnesses it):
 - **Your PRs & achievements** need a **peer** to verify them — any other linked member
   (you can't verify your own). Until verified, the change is pending.
 - **Name changes & new athletes** need an **admin**.
+- **Your bodyweight** is optional and yours alone: add, change or clear it in My PRs. It
+  applies at once, without review, and clearing it takes you off the bodyweight boards
+  without leaving a copy in the request history. Like everything on the board it is public:
+  anyone can work it out from your ratios.
 - **Admins** manage members and can edit the board directly. The database always keeps
   at least one working admin, and the members list won't let admins demote or block
   themselves.
@@ -85,7 +97,7 @@ workspace files such as `.env`. To try forms without touching the real board, op
 `http://localhost:3000/?fixture=admin`. Other local fixtures: `returning` (a member whose
 athlete was archived), `empty`, `error`, and `large` (65 athletes; combine with
 `&tv&rotate=120` to inspect TV pagination), and `layout` (long medalist names and maximum
-scores). All fixture writes
+scores). Add `&bodyweight` to see the bodyweight boards. All fixture writes
 stay in memory, and fixtures are excluded from the deployed site.
 
 The boards use shared ranks for ties (1, 1, 3). A zero value means no entry. Enter weights
@@ -100,7 +112,8 @@ was verified, and the remaining follow-ups.
 For an existing database, apply the numbered files in
 [`supabase/migrations/`](supabase/migrations/) in order in the Supabase SQL Editor before
 deploying the frontend that needs them (the live database has everything through
-`0007_archive_athletes.sql`). They preserve existing data. For a fresh installation, use
+`0007_archive_athletes.sql`; version 3.3 needs `0008_bodyweight.sql` first). They preserve
+existing data. For a fresh installation, use
 `supabase/schema.sql` instead; that file resets the tables.
 
 ## Backups
