@@ -131,7 +131,7 @@ was verified, and the remaining follow-ups.
 For an existing database, apply the numbered files in
 [`supabase/migrations/`](supabase/migrations/) in order (the Supabase SQL Editor, or
 `supabase db query --linked -f <file>`) before deploying the frontend that needs them (the
-live database has everything through `0010_planner.sql`; release 3.6.1 needs `0011_friday_joins.sql`). They preserve existing data. For a
+live database has everything through `0011_friday_joins.sql`). They preserve existing data. For a
 fresh installation, use `supabase/schema.sql` instead; that file resets the tables.
 
 ## Backups

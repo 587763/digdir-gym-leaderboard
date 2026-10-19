@@ -259,8 +259,8 @@ still advances. A PR verified while the board is open gets a celebration banner.
 
 ## Database upgrades and deployment
 Apply migrations in order before deploying the frontend that needs them; production has
-0002–0010 (0001 was superseded; 0008 and 0009 applied 12 October 2026, 0010 on 19 October 2026).
-0011 (Friday joins, needed by 3.6.1) is not applied yet; the planner fails to load without it.
+0002–0011 (0001 was superseded; 0008 and 0009 applied 12 October 2026, 0010 and 0011 on 19
+October 2026). The planner (3.6.1) reads `friday_joins`, so it fails to load without 0011.
 A PR whose frontend needs a new migration also applies it to production as part of the work
 (the maintainer's standing rule), after checking the backup ran, and records it here.
 The frontend selects `athletes.archived_at` (since 3.2, 0007) and `athletes.bodyweight` (since
