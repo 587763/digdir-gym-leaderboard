@@ -128,10 +128,10 @@ The [repository review](REVIEW.md) records what the September 2026 reviews chang
 was verified, and the remaining follow-ups.
 
 For an existing database, apply the numbered files in
-[`supabase/migrations/`](supabase/migrations/) in order in the Supabase SQL Editor before
-deploying the frontend that needs them (the live database has everything through
-`0009_strict_curl.sql`; release 3.6 needs `0010_planner.sql`). They preserve existing data. For a fresh installation, use
-`supabase/schema.sql` instead; that file resets the tables.
+[`supabase/migrations/`](supabase/migrations/) in order (the Supabase SQL Editor, or
+`supabase db query --linked -f <file>`) before deploying the frontend that needs them (the
+live database has everything through `0010_planner.sql`). They preserve existing data. For a
+fresh installation, use `supabase/schema.sql` instead; that file resets the tables.
 
 ## Backups
 

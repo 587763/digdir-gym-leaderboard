@@ -250,22 +250,25 @@ still advances. A PR verified while the board is open gets a celebration banner.
   main lift there gets the board sticker by itself.
 
 ## Database upgrades and deployment
-Apply migrations in order through the Supabase SQL Editor before deploying the frontend that
-needs them; production has 0002–0009 (0001 was superseded; 0008 and 0009 applied 12 October 2026).
-0010 (planner, needed by 3.6) is not applied yet. Without it the boards still work, but the
-planner says that plans could not load.
+Apply migrations in order before deploying the frontend that needs them; production has
+0002–0010 (0001 was superseded; 0008 and 0009 applied 12 October 2026, 0010 on 19 October 2026).
+A PR whose frontend needs a new migration also applies it to production as part of the work
+(the maintainer's standing rule), after checking the backup ran, and records it here.
 The frontend selects `athletes.archived_at` (since 3.2, 0007) and `athletes.bodyweight` (since
 3.3, 0008), so it cannot load boards on a database without them; without 0009, strict curls
-accept only whole kilograms. Migrations are
+accept only whole kilograms; without 0010 (3.6) the planner says plans could not load. Migrations are
 transactional and idempotent and rewrite no rows; 0006 stops with a named athlete if a
 stored value breaks its unit. Tests execute migrations in local Postgres (PGlite). Check the
 backup workflow ran recently before applying one (see Backups).
 
-For a live upgrade: paste the numbered migration into Supabase SQL Editor, or use a SQL
-client that supports multi-statement transactions. Never use `supabase db push`: the
+For a live upgrade: `supabase db query --linked -f supabase/migrations/<file>.sql` (the repo
+is linked to the project). `--linked` goes through the Management API like the SQL Editor:
+it runs the whole file, as `postgres`, inside the file's own `begin`/`commit` (used for 0010).
+Pasting the file into the SQL Editor works too. Never use `supabase db push`: the
 hand-numbered files are not in the CLI migration ledger and it would replay superseded 0001.
-The installed `supabase db query -f` sends one prepared statement and cannot execute these
-multi-statement migrations as-is; use the SQL Editor instead of splitting a transaction.
+`supabase db query --db-url` sends one prepared statement and cannot run these multi-statement
+migrations; don't split a transaction to make it fit. Afterwards, check the objects with
+read-only queries and the public API with the publishable key (RLS still refuses visitors).
 
 Production DB URL is in the gitignored `.env`, with spaces around `=`. Do not source it or
 print credentials. Config in `js/config.js` is a safe publishable key; never commit a
