@@ -1,16 +1,16 @@
 # CLAUDE.md — agent guide: digdir-gym-leaderboard
 
-Office gym leaderboard: public PRs, podiums, peer verification, achievements, progression and
-opt-in bodyweight rankings.
+Office gym leaderboard: public PRs, podiums, peer verification, achievements, progression,
+opt-in bodyweight rankings, the Friday lift rotation and a members-only gym planner.
 Live: https://587763.github.io/digdir-gym-leaderboard/ · Origin: `587763/digdir-gym-leaderboard`.
 
 ## Non-negotiables
 - Buildless static site; no backend, framework or npm runtime dependencies. Supabase is a
   pinned CDN script with SRI. Node and dev dependencies are only for local tooling/tests.
 - Classic scripts, in order: config → ui → achievements → changelog → lifts → avatar → store →
-  history → board → tv → app. Public globals: `LEADERBOARD_CONFIG`, `UI`, `ACHIEVEMENTS`/
+  history → board → planner → tv → app. Public globals: `LEADERBOARD_CONFIG`, `UI`, `ACHIEVEMENTS`/
   `getAchievement`, `CHANGELOG`, `EXERCISES`/`Lifts`, `renderAvatar`, `Store`, `HistoryView`,
-  `BoardView`, `TvDisplay`, `app`.
+  `BoardView`, `Planner`, `TvDisplay`, `app`.
   Classic scripts keep `?v=` cache-busting coordinated on GitHub Pages (ES modules would need
   a version on every import). A new script needs a tag, the dev-server allowlist and tests.
 - Build markup with the `UI.html` tagged template: it escapes every interpolation unless the
@@ -54,6 +54,8 @@ Live: https://587763.github.io/digdir-gym-leaderboard/ · Origin: `587763/digdir
 - `js/avatar.js`: deterministic name-derived SVG figures; `{ decorative: true }` hides a
   figure from screen readers when its name is visible next to it.
 - `js/store.js`: auth, reads (explicit columns), governed writes, admin writes and realtime.
+  Plans (`listPlans`, `savePlan`/`deletePlan`/`joinPlan` RPCs) have their own realtime channel,
+  so trouble there never stops board updates.
   Errors propagate; admin writes select a row so RLS-denied no-ops cannot appear successful.
   Athlete edits compare the opening `updated_at` value to reject concurrent edits. Auth
   callbacks defer consumers with `setTimeout` to avoid re-entering Supabase's auth lock.
@@ -62,9 +64,27 @@ Live: https://587763.github.io/digdir-gym-leaderboard/ · Origin: `587763/digdir
   corrections are called out when the board differs from the last verified value.
 - `js/board.js`: pure `BoardView` for boards, podiums, medals, the Latest feed and the Hall of
   Fame. Markers: ⏳ pending change, 🔥 PR verified in the last 7 days (on a bodyweight board,
-  in the exercise it adjusts), highlighter on your rows. With `ctx.bodyweight`, `group()`
+  in the exercise it adjusts), highlighter on your rows, a 📅 sticker on this Friday's lift
+  (`ctx.friday`, by base exercise so bodyweight boards get it too). With `ctx.bodyweight`, `group()`
   swaps each board for its bodyweight version; the title says how (`/ BW` or `× BW`) and the
   score column names the unit.
+- `js/planner.js`: pure `Planner`, like `BoardView`. The Friday rotation runs by the calendar:
+  `ROTATION.order` (squat, bench, deadlift, `other` = the Other lifts group) one per Friday from
+  `ROTATION.start`; a skipped Friday still uses its turn, and moving `start` a week shifts it.
+  Calendar days are local (`dayKey`, `addDays`, `dayNumber` are DST-safe); weeks start Monday;
+  the planner shows this week and 8 more (`WEEKS`), opening on next week at the weekend.
+  `readPlan` mirrors SQL `save_plan()` (activity 1–60, note ≤200, from 2 h ago to 60 days
+  ahead); `isOpen` (joinable until 2 h after the start). People come at their own time:
+  `arrivals` (host at the start, joiners at `arrives_at`, earliest first), `timeLabel`
+  ("13:00+" when someone comes later), `readArrival` (within 6 h of the start, like SQL);
+  `nextPlan` and each day's order go by the earliest arrival.
+  Markup: `fridayNote` (the sticky note in `#nextLift`: the Friday lift for everyone, plus the
+  next session and how many are in for members; a session on a day before Friday leads and
+  the Friday lift shrinks to a labelled emoji), `tvNote` (`#tvNextLift`, the same in one TV
+  header line; both share `noteState`),
+  `otherCallout` (`#otherFriday`, one line on Other Lifts when they are up), `week`
+  (`#plannerBody`) and `session` (`#planSessionBody`: who comes when). `fridayBoard` is
+  `ctx.friday` for `BoardView`, which stickers that board.
 - `js/tv.js`: `TvDisplay` rotation, dwell, podium/Hall of Fame fitting and paging.
 - `js/app.js`: controller: state, serialized/coalesced refreshes with a 20 s read timeout,
   identity generation checks, one delegated `data-action` dispatcher (`runAction` marks async
@@ -72,8 +92,15 @@ Live: https://587763.github.io/digdir-gym-leaderboard/ · Origin: `587763/digdir
   members and athletes. Reconciles every 60 s while visible and on online/focus. A refresh
   re-renders only when what it would draw differs from what is shown (`boardSnapshot()`,
   including relative-time labels), so unchanged refreshes preserve focused controls and open
-  dialogs while "just now" still ages. `app.ready` resolves after init. ⚖️ Bodyweight ranking
-  is a per-viewer mode (`app.bodyweight`), not a tab: the header toggle persists it in
+  dialogs while "just now" still ages; the snapshot includes today's date and which plans are
+  still open. Plans load with the board for signed-in users, but a failed plans read only sets
+  `plansError` (the planner says so) and never fails the board. The planner is a dialog
+  (`#plannerModal`) opened only from the note, with one view at a time (`showPlannerView`, no
+  stacked dialogs): the week, a session (`openSession`: who comes when, plus the static
+  `#joinForm` for your time, so refreshes never lose what you typed) or the plan form. A
+  session's title, I'm in and the note's next session open the session view; Escape or Back
+  returns to the week.
+  `app.ready` resolves after init. ⚖️ Bodyweight ranking is a per-viewer mode (`app.bodyweight`), not a tab: the header toggle persists it in
   `localStorage['lb.bodyweight']`, mirrors it in `?bodyweight=1`, shows `#bodyweightNote`
   and re-renders the boards in place.
 - `supabase/schema.sql`: destructive fresh-install schema + seed. Never run against production.
@@ -82,15 +109,17 @@ Live: https://587763.github.io/digdir-gym-leaderboard/ · Origin: `587763/digdir
   safeguards (withdraw, last admin, unit validation, reviewer FK, recent-PR index); 0007
   archived athletes (`archived_at`, `restore_my_athlete()`, archive-aware propose/decide);
   0008 opt-in bodyweight (`athletes.bodyweight` with a 30–300 check, `set_my_bodyweight()`);
-  0009 strict curl (`strictcurl` takes one decimal in `lift_allows_decimals()`).
+  0009 strict curl (`strictcurl` takes one decimal in `lift_allows_decimals()`); 0010 planner
+  (`plans`, `plan_joins`, `can_plan()`, `save_plan()`, `delete_plan()`, `join_plan()`, realtime).
 - `scripts/dev-server.mjs`: Node static allowlist server, no caching, localhost only. Does not
   serve `.env`, `.git`, SQL or arbitrary workspace files. `PORT` overrides 3000.
 - `scripts/browser-check.mjs`: zero-dependency layout checks in local Chrome over the DevTools
   protocol (`CHROME=` overrides detection). Asserts no horizontal overflow, scores inside their
   boards, TV never scrolls and every ranked row renders on screen on some page, dialogs open
   cleanly, table text stays in its cells, the selected tab is visible, focus survives a
-  re-render, and a quiet console. Every tab is checked ranked by bodyweight and by weight
-  lifted. Assert containment, not pixels (fonts differ by machine).
+  re-render, the Friday note and plan cards keep their content inside, and a quiet console.
+  Every tab is checked ranked by bodyweight and by weight lifted; the planner as dialogs.
+  Assert containment, not pixels (fonts differ by machine).
 - `tests/`: Node tests, LinkeDOM UI tests (with `<dialog>` and innerHTML shims in helpers),
   PGlite Postgres/RLS tests, isolated browser fixtures (`tests/browser-store.js`).
 - `.github/workflows/deploy.yml`: tests PRs and main; deploys main only after both `npm test`
@@ -111,7 +140,7 @@ keyboard focus/Escape, no console errors. Missing config/CDN leaves usable tabs 
 explanation instead of crashing. Refresh failures preserve the last board and expose Retry.
 
 Local-only fixtures: `/?fixture=admin` (signed-in admin with a pending PR, a pending member
-claim, a blocked member and an archived athlete), `returning` (a member whose athlete was
+claim, a blocked member, an archived athlete and planned sessions this week and next), `returning` (a member whose athlete was
 archived; shows the welcome-back banner), `empty`, `error`, `large` (65 athletes), or `layout`
 (long medalist names and maximum scores). Fixture athletes share bodyweights except every
 third; add `&bodyweight` to rank by them. TV fixture labels do not consume board height. The dev
@@ -159,6 +188,16 @@ Fixture controls/data are never included in the deployed artifact.
   rejected but never approved or withdrawn.
 - Bootstrap admin is GitHub login `587763`, only with GitHub provider metadata. Missing login
   metadata creates an ordinary pending profile.
+- Planner: `plans` (owner, starts_at, activity, note) and `plan_joins` (plan, member,
+  arrives_at). Plans
+  say when someone will be at the gym, so only `can_plan()` users (unblocked admins and active
+  members linked to an athlete) can read them; visitors and the TV see only the Friday
+  rotation, which is computed and stored nowhere. There are no write policies: `save_plan()`
+  creates or changes your own plan (deduplicates retries, at most 20 upcoming each),
+  `delete_plan()` lets the owner or an admin remove one, `join_plan(id, join, arrives_at)` joins
+  someone else's at a time within 6 h of its start (null: at the start; joining again changes
+  it) or leaves; joining closes 2 h after the start. Moving a session moves every arrival with it. Deleting a member's account removes their plans
+  and joins. Old plans are not purged; reads only fetch the weeks shown.
 
 ## TV / display mode
 Enable with `?tv` or the header toggle (hidden on phones). State is persisted defensively in
@@ -188,6 +227,11 @@ still advances. A PR verified while the board is open gets a celebration banner.
   `--tv-scale` (`min(1rem, 1.15vw)`) so 720p keeps names whole. A fifth board in one tab
   needs a new TV layout (or paging through rows of boards).
 - Connection warnings and Retry remain visible in the TV footer reserve.
+- The Friday note becomes one sticky line in the TV header (`#tvNextLift`), taking no board
+  height: the Friday lift, plus the next session on a TV signed in as a member (a signed-out
+  TV cannot read plans). Below 1500px wide a Friday-first line stacks its two parts so it stays
+  beside the title. Board stickers sit on the board's corner (`.tv-mode .leaderboards` keeps
+  14px for them) and the Other Lifts line shows too. The planner itself never shows on TV.
 
 ## Extending
 - Achievement: add to `ACHIEVEMENTS`; forms, badges and Hall of Fame follow automatically.
@@ -202,22 +246,29 @@ still advances. A PR verified while the board is open gets a celebration banner.
   must not remove achievements absent from the form.
 - New board tab: a tab button + panel with `data-board-group` in `index.html`, a group in
   `BoardView.group()`, and `hasContent()` in app.js if it can be empty.
+- Friday rotation: change `Planner.ROTATION` (`order` takes main lift ids and `other`); a new
+  main lift there gets the board sticker by itself.
 
 ## Database upgrades and deployment
-Apply migrations in order through the Supabase SQL Editor before deploying the frontend that
-needs them; production has 0002–0009 (0001 was superseded; 0008 and 0009 applied 12 October 2026).
+Apply migrations in order before deploying the frontend that needs them; production has
+0002–0010 (0001 was superseded; 0008 and 0009 applied 12 October 2026, 0010 on 19 October 2026).
+A PR whose frontend needs a new migration also applies it to production as part of the work
+(the maintainer's standing rule), after checking the backup ran, and records it here.
 The frontend selects `athletes.archived_at` (since 3.2, 0007) and `athletes.bodyweight` (since
 3.3, 0008), so it cannot load boards on a database without them; without 0009, strict curls
-accept only whole kilograms. Migrations are
+accept only whole kilograms; without 0010 (3.6) the planner says plans could not load. Migrations are
 transactional and idempotent and rewrite no rows; 0006 stops with a named athlete if a
 stored value breaks its unit. Tests execute migrations in local Postgres (PGlite). Check the
 backup workflow ran recently before applying one (see Backups).
 
-For a live upgrade: paste the numbered migration into Supabase SQL Editor, or use a SQL
-client that supports multi-statement transactions. Never use `supabase db push`: the
+For a live upgrade: `supabase db query --linked -f supabase/migrations/<file>.sql` (the repo
+is linked to the project). `--linked` goes through the Management API like the SQL Editor:
+it runs the whole file, as `postgres`, inside the file's own `begin`/`commit` (used for 0010).
+Pasting the file into the SQL Editor works too. Never use `supabase db push`: the
 hand-numbered files are not in the CLI migration ledger and it would replay superseded 0001.
-The installed `supabase db query -f` sends one prepared statement and cannot execute these
-multi-statement migrations as-is; use the SQL Editor instead of splitting a transaction.
+`supabase db query --db-url` sends one prepared statement and cannot run these multi-statement
+migrations; don't split a transaction to make it fit. Afterwards, check the objects with
+read-only queries and the public API with the publishable key (RLS still refuses visitors).
 
 Production DB URL is in the gitignored `.env`, with spaces around `=`. Do not source it or
 print credentials. Config in `js/config.js` is a safe publishable key; never commit a

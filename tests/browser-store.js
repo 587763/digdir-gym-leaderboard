@@ -38,6 +38,21 @@
     {id:'pr-3',athlete_id:'athlete-1',payload:{lift:'bench',value:120,previous_value:110},decided_at:'2026-08-01T10:00:00Z'},
     {id:'pr-4',athlete_id:'athlete-archived',payload:{lift:'squat',value:120,previous_value:110},decided_at:'2026-07-15T10:00:00Z'},
   ];
+  // Planned sessions this week and next, relative to today, with people joining them.
+  const at = (days, hour, minute = 0) => { const d = new Date(); d.setDate(d.getDate() + days); d.setHours(hour, minute, 0, 0); return d.toISOString(); };
+  const friday = (5 - new Date().getDay() + 7) % 7;
+  // Each join is [user, arrival]; people come at different times.
+  const join = (...people) => people.map(([user_id, arrives_at], i) => ({user_id, arrives_at, created_at:ago(1 - i / 10)}));
+  let plans = fixture === 'empty' ? [] : [
+    {id:'plan-1',owner:'peer',starts_at:at(0, 16),activity:'Squat',note:'Working up to a heavy triple. Spotters welcome!',plan_joins:join(['admin',at(0, 16, 30)])},
+    {id:'plan-2',owner:'admin',starts_at:at(1, 11, 30),activity:'Upper body',note:null,plan_joins:join(['peer',at(1, 11, 30)])},
+    {id:'plan-3',owner:'peer',starts_at:at(friday, 15),activity:'Bench Press',note:'Friday bench. Bring chalk.',plan_joins:join(['rita',at(friday, 14, 30)])},
+    {id:'plan-4',owner:'admin',starts_at:at(friday + 3, 7, 30),activity:'5 km run along the river',note:null,plan_joins:[]},
+    {id:'plan-5',owner:'rita',starts_at:at(-1, 12),activity:'Deadlift',note:null,plan_joins:join(['peer',at(-1, 12)],['admin',at(-1, 12, 15)])},
+  ];
+  if (fixture === 'admin') plans.push({id:'plan-long',owner:'peer',starts_at:at(2, 17, 45),activity:'Longactivitynamewithoutanyspaces'.repeat(2).slice(0, 60),
+    note:'A long note that keeps going, because someone had a lot to say about their plans for the afternoon session and the kettlebells.'.slice(0, 200),
+    plan_joins:join(['admin',at(2, 18)],['rita',at(2, 17, 45)],['newbie',at(2, 19, 15)])});
   const copy = (data) => structuredClone(data);
   const signedIn = ['admin', 'returning'].includes(fixture);
   window.Store = {
@@ -48,6 +63,15 @@
     listPendingProposals:async()=>copy(proposals),
     listRecentPrs:async()=>copy(history).reverse(),
     listAthleteHistory:async(id)=>copy(history.filter((h)=>h.athlete_id===id)),
+    listPlans:async(from,to)=>copy(plans.filter((p)=>p.starts_at>=from&&p.starts_at<to).sort((a,b)=>a.starts_at.localeCompare(b.starts_at))),
+    savePlan:async(id,starts_at,activity,note)=>{const plan=plans.find((p)=>p.id===id);
+      if(!plan) return plans.push({id:crypto.randomUUID(),owner:me.user_id,starts_at,activity,note,plan_joins:[]});
+      const moved=Date.parse(starts_at)-Date.parse(plan.starts_at);
+      plan.plan_joins.forEach((j)=>{j.arrives_at=new Date(Date.parse(j.arrives_at)+moved).toISOString();});
+      Object.assign(plan,{starts_at,activity,note});},
+    deletePlan:async(id)=>{plans=plans.filter((p)=>p.id!==id);},
+    joinPlan:async(id,joining,arrives_at)=>{const plan=plans.find((p)=>p.id===id); plan.plan_joins=plan.plan_joins.filter((j)=>j.user_id!==me.user_id);
+      if(joining) plan.plan_joins.push({user_id:me.user_id,arrives_at:arrives_at??plan.starts_at,created_at:new Date().toISOString()});},
     subscribe:(_cb,status)=>status('SUBSCRIBED'), onAuthChange(){},
     signIn:async()=>{},signOut:async()=>{},
     propose:async(kind,id,payload)=>{proposals.push({id:crypto.randomUUID(),kind,athlete_id:id,payload,proposer:'admin',approval:['pr','achievement'].includes(kind)?'peer':'admin',status:'pending',created_at:new Date().toISOString()});},

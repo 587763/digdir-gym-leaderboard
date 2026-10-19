@@ -20,6 +20,9 @@ class LeaderboardApp {
     this.profiles = [];
     this.proposals = [];
     this.recentPrs = [];
+    this.plans = [];        // planned sessions (members on the board only), with who joins them
+    this.plansError = null; // the planner failed to load; the boards still work
+    this.plannerWeek = Planner.defaultWeek(); // weeks after this one shown in the planner
     this.seenPrIds = null; // verified PRs already on screen; null until the first load
     this.user = null;
     this.profile = null;
@@ -44,6 +47,8 @@ class LeaderboardApp {
   // Archived athletes keep their member link: signing in with the same GitHub account
   // brings the member back to it, and they can restore it themselves.
   get myAthleteArchived() { return !!this.athleteById(this.myAthleteId)?.archived_at; }
+  // Who sees and makes plans, as in SQL can_plan(): members on the board and admins.
+  get canPlan() { return this.isAdmin || this.isActive; }
 
   async init() {
     this.buildForms();
@@ -70,6 +75,8 @@ class LeaderboardApp {
         this.profile = null;
         this.profiles = [];
         this.proposals = [];
+        this.plans = [];
+        this.plansError = null;
         UI.dialogs.closeAll();
         this.reflectAuth();
         this.render(); // Clear private pending markers even if the public data stays unchanged.
@@ -134,14 +141,20 @@ class LeaderboardApp {
   async readBoard() {
     const session = await Store.getSession();
     const user = session?.user ?? null;
-    const [athletes, recentPrs, profile, profiles, proposals] = await Promise.all([
+    const { from, to } = Planner.range();
+    // The planner is extra: when its read fails, the boards still load and its tab says so.
+    const plans = user ? Promise.resolve().then(() => Store.listPlans(from, to)).then((list) => ({ list }), (error) => ({ error }))
+      : { list: [] };
+    const [athletes, recentPrs, profile, profiles, proposals, planned] = await Promise.all([
       Store.listAthletes(),
       Store.listRecentPrs(),
       user ? Store.myProfile(user.id) : null,
       user ? Store.listProfiles() : [],
       user ? Store.listPendingProposals() : [],
+      plans,
     ]);
-    return { user, allAthletes: athletes, recentPrs, profile, profiles, proposals };
+    return { user, allAthletes: athletes, recentPrs, profile, profiles, proposals,
+      plans: planned.list ?? this.plans, plansError: planned.error ?? null };
   }
 
   withTimeout(promise, ms = this.readTimeoutMs) {
@@ -154,12 +167,14 @@ class LeaderboardApp {
 
   // What the screen shows. The relative-time labels are part of it, so a periodic check
   // re-renders once "just now" should read "5 minutes ago" or a 🔥 week runs out, while
-  // truly unchanged refreshes still leave focused controls and open dialogs alone.
+  // truly unchanged refreshes still leave focused controls and open dialogs alone. So are
+  // the date (the Friday lift and today's column) and which planned sessions started or ended.
   boardSnapshot() {
     return JSON.stringify([this.user, this.profile, this.allAthletes, this.profiles,
       this.proposals, this.recentPrs, this.loading, !!this.loadError, this.bodyweight,
       this.latestPrs().map((item) => UI.timeAgo(item.at)), [...this.freshPrs().keys()],
-      this.proposals.map((p) => UI.timeAgo(p.created_at))]);
+      this.proposals.map((p) => UI.timeAgo(p.created_at)), this.plans, !!this.plansError, this.plannerWeek,
+      Planner.dayKey(new Date()), this.plans.map((p) => [Planner.isOpen(p), Date.parse(p.starts_at) <= Date.now()])]);
   }
 
   // Verified improvements, newest first, joined to athletes still on the board.
@@ -220,7 +235,7 @@ class LeaderboardApp {
     return {
       athletes: this.athletes, tv: this.tv.enabled, loading: this.loading, error: !!this.loadError, bodyweight: this.bodyweight,
       pending: this.pendingAthletes(), fresh: this.freshPrs(), latest: this.latestPrs(),
-      me: this.myAthleteId, podiumFits, hallTable, viewportHeight: window.innerHeight,
+      me: this.myAthleteId, podiumFits, hallTable, viewportHeight: window.innerHeight, friday: Planner.fridayBoard(),
     };
   }
 
@@ -232,6 +247,7 @@ class LeaderboardApp {
         container.innerHTML = BoardView.group(container.dataset.boardGroup, ctx);
       });
       document.getElementById('hallOfFame').innerHTML = BoardView.hallOfFame(ctx);
+      this.renderPlanner();
     });
     this.updateReviewCount();
     this.updateBoardStatus();
@@ -350,6 +366,11 @@ class LeaderboardApp {
     document.getElementById('achievementFields').addEventListener('change', () => this.updateAvatarPreview());
     document.getElementById('athleteFilter').addEventListener('input', () => this.renderAthletesList());
     document.addEventListener('input', (e) => { if (e.target.classList?.contains('time-input')) this.updateTimeHint(e.target); });
+    ['input', 'change'].forEach((type) => document.getElementById('planDate').addEventListener(type, () => this.updatePlanFriday()));
+    // Escape in a session or the plan form goes back to the week; closing the planner leaves it on the week.
+    const planner = document.getElementById('plannerModal');
+    planner.addEventListener('cancel', (e) => { if (this.plannerView() !== 'week') { e.preventDefault(); this.showPlannerView('week'); } });
+    planner.addEventListener('close', () => this.showPlannerView('week', { focus: false }));
 
     // Fallback if a realtime event is missed: refresh when the tab regains focus.
     // Also pause/resume TV rotation so off-screen time doesn't burn through tabs.
@@ -381,6 +402,14 @@ class LeaderboardApp {
       'toggle-tv': () => this.tv.toggle(),
       'toggle-bodyweight': () => this.toggleBodyweight(),
       'open-changelog': () => this.openChangelog(),
+      'open-planner': (planId) => this.openPlanner(planId),
+      'plan-back': () => this.showPlannerView('week'),
+      'plan-open': (id) => this.openSession(id),
+      'plan-leave': (id) => this.leavePlan(id),
+      'planner-week': (step) => this.stepPlannerWeek(Number(step)),
+      'plan-add': (day) => this.openPlanEditor(null, day),
+      'plan-edit': (id) => this.openPlanEditor(id),
+      'plan-delete': (id) => this.deletePlan(id),
       retry: () => this.refreshAll(),
       'open-mine': () => this.openMine(),
       'open-claim': () => this.openClaim(),
@@ -414,7 +443,8 @@ class LeaderboardApp {
   }
 
   onSubmit(event) {
-    const forms = { athleteForm: () => this.saveAthlete(), mineForm: () => this.submitMine(), claimForm: () => this.submitClaim() };
+    const forms = { athleteForm: () => this.saveAthlete(), mineForm: () => this.submitMine(), claimForm: () => this.submitClaim(),
+      planForm: () => this.submitPlan(), joinForm: () => this.submitJoin() };
     const submit = forms[event.target.id];
     if (!submit) return;
     event.preventDefault();
@@ -524,6 +554,7 @@ class LeaderboardApp {
       'Optional. It ranks you when ⚖️ Bodyweight ranking is on, and anyone can work it out from your scores there. Saved straight away, without review; clear it to leave.');
     document.getElementById('adminBodyweightField').innerHTML = this.bodyweightField('adminBodyweight',
       'Members share this themselves in My PRs. Correct it, or clear it if they ask.');
+    document.getElementById('planActivities').innerHTML = html`${Planner.suggestions().map((s) => html`<option value="${s}"></option>`)}`;
   }
 
   // One fieldset per board group; each input is named after its exercise id.
@@ -958,6 +989,188 @@ class LeaderboardApp {
     await Store.adminDeleteAthlete(id);
     await this.refreshAll();
     UI.toast('Deleted permanently', 'success');
+  }
+
+  // --- Friday lift and planner --------------------------------------------------
+  // The Friday note by the member controls (with the next session for members), its line in
+  // the TV header, the Other Lifts line when they are up, and the planner dialog's week and session.
+  renderPlanner() {
+    const now = new Date();
+    const note = { now, canSee: this.canPlan, error: !!this.plansError, plan: Planner.nextPlan(this.plans, now),
+      me: this.user?.id ?? null, member: (id) => this.memberOf(id) };
+    document.getElementById('nextLift').innerHTML = Planner.fridayNote(note);
+    document.getElementById('tvNextLift').innerHTML = Planner.tvNote(note);
+    const other = document.getElementById('otherFriday');
+    other.innerHTML = Planner.otherCallout(now);
+    other.hidden = !other.innerHTML;
+    document.getElementById('plannerBody').innerHTML = Planner.week(this.plannerContext(now));
+    if (this.viewingPlan) {
+      document.getElementById('planSessionBody').innerHTML = Planner.session(this.planById(this.viewingPlan), this.plannerContext(now));
+      this.updateJoinForm();
+    }
+  }
+
+  plannerContext(now = new Date()) {
+    return {
+      now, week: this.plannerWeek, plans: this.plans, loading: this.loading, error: !!this.plansError,
+      signedIn: this.signedIn, configured: Store.configured, canSee: this.canPlan, canPlan: this.canPlan,
+      isAdmin: this.isAdmin, me: this.user?.id ?? null, member: (id) => this.memberOf(id),
+    };
+  }
+
+  // A member as the planner names them: their athlete, or their GitHub login.
+  memberOf(userId) {
+    const profile = this.profileByUser(userId);
+    const athlete = this.athleteById(profile?.athlete_id);
+    return { name: athlete?.name || (profile?.github_login ? `@${profile.github_login}` : 'a member'), athlete };
+  }
+
+  planById(id) { return this.plans.find((p) => p.id === id); }
+
+  // The Friday note opens the planner on the week of the coming Friday, or straight on the
+  // session clicked.
+  openPlanner(planId = null) {
+    this.plannerWeek = Planner.defaultWeek();
+    this.showPlannerView('week', { focus: false });
+    this.render();
+    UI.dialogs.open('plannerModal');
+    if (planId) this.openSession(planId);
+  }
+
+  // The planner shows one view at a time: the week, one session (who comes when, and the time
+  // you'll come) or the plan form. Back on the week, focus returns to the control that left it
+  // (re-rendered meanwhile, so found by its action).
+  plannerView() {
+    return document.getElementById('planSession').hidden ? (document.getElementById('planForm').hidden ? 'week' : 'plan') : 'session';
+  }
+  showPlannerView(view, { focus = true } = {}) {
+    const current = this.plannerView();
+    if (current === view) return;
+    const views = { week: 'plannerBody', session: 'planSession', plan: 'planForm' };
+    for (const [name, id] of Object.entries(views)) document.getElementById(id).hidden = name !== view;
+    if (current === 'week') this.planReturn = document.activeElement;
+    if (view !== 'week') {
+      if (focus) document.getElementById(view === 'plan' ? 'planTime' : 'planSessionTitle').focus();
+      return;
+    }
+    this.viewingPlan = null;
+    const back = this.planReturn;
+    this.planReturn = null;
+    if (!focus) return;
+    const twin = back?.dataset && [...document.querySelectorAll(`#plannerBody [data-action="${back.dataset.action}"]`)]
+      .find((control) => control.dataset.id === back.dataset.id);
+    (twin || document.querySelector('#plannerModal .modal-content')).focus();
+  }
+
+  // One session: who comes when, and (for others' open sessions) the time you'll come.
+  openSession(planId) {
+    const plan = this.planById(planId);
+    if (!plan) throw new Error('This session is no longer planned.');
+    if (!UI.dialogs.isOpen('plannerModal')) this.openPlanner();
+    this.plannerWeek = Planner.weekOf(new Date(plan.starts_at)); // Back shows its week
+    this.viewingPlan = plan.id;
+    this.render();
+    document.getElementById('joinTime').value = Planner.timeValue(Planner.arrivalOf(plan, this.user?.id) ?? plan.starts_at);
+    this.showPlannerView('session');
+  }
+
+  // The join form follows the session: hidden for your own or a finished session, and once you
+  // are in it changes your time or lets you leave.
+  updateJoinForm() {
+    const plan = this.planById(this.viewingPlan);
+    const form = document.getElementById('joinForm');
+    form.hidden = !plan || !this.canPlan || plan.owner === this.user?.id || !Planner.isOpen(plan);
+    if (form.hidden) return;
+    const joined = Planner.arrivalOf(plan, this.user?.id) != null;
+    document.getElementById('joinSubmit').textContent = joined ? 'Save my time' : '🙋 I\'m in';
+    const leave = document.getElementById('joinLeave');
+    leave.hidden = !joined;
+    leave.dataset.id = plan.id;
+    document.getElementById('joinHint').textContent = `${this.memberOf(plan.owner).name} starts at ${Planner.formatTime(plan.starts_at)}.`;
+  }
+
+  stepPlannerWeek(step) {
+    this.plannerWeek = Planner.clampWeek(this.plannerWeek + step);
+    this.render();
+  }
+
+  // A new plan starts on the given day, or the first day of the shown week that hasn't passed.
+  openPlanEditor(planId = null, day = null) {
+    if (!this.canPlan) return UI.toast('Claim your spot on the board to plan sessions', 'error');
+    const plan = planId ? this.planById(planId) : null;
+    if (planId && !plan) throw new Error('This session is no longer planned.');
+    if (plan && plan.owner !== this.user?.id) throw new Error('You can only change your own sessions.');
+    if (!UI.dialogs.isOpen('plannerModal')) this.openPlanner();
+    else this.showPlannerView('week', { focus: false });
+    const now = new Date();
+    const firstDay = Planner.weekStart(now, this.plannerWeek);
+    const date = document.getElementById('planDate');
+    date.min = Planner.dayKey(now);
+    date.max = Planner.dayKey(Planner.lastDay(now));
+    date.value = plan ? Planner.dayKey(new Date(plan.starts_at)) : day || Planner.dayKey(firstDay > now ? firstDay : now);
+    document.getElementById('planTime').value = plan ? Planner.timeValue(plan.starts_at) : '';
+    document.getElementById('planActivity').value = plan?.activity ?? '';
+    document.getElementById('planNote').value = plan?.note ?? '';
+    document.getElementById('planFormTitle').textContent = plan ? 'Change your session' : 'Plan a session';
+    this.editingPlan = plan?.id ?? null;
+    this.autoActivity = '';
+    this.updatePlanFriday();
+    this.showPlannerView('plan');
+  }
+
+  // Say a Friday's lift under the date. A new plan on a Friday starts as that lift, unless
+  // the member already wrote what they'll do.
+  updatePlanFriday() {
+    const value = document.getElementById('planDate').value;
+    const friday = /^\d{4}-\d{2}-\d{2}$/.test(value) ? Planner.fridayFocus(Planner.fromKey(value)) : null;
+    document.getElementById('planFriday').textContent = friday ? `📅 Friday lift: ${friday.emoji} ${friday.label}` : '';
+    const activity = document.getElementById('planActivity');
+    if (this.editingPlan || activity.value !== this.autoActivity) return;
+    activity.value = this.autoActivity = friday?.label ?? '';
+  }
+
+  async submitPlan() {
+    if (!this.canPlan) throw new Error('Claim your spot on the board to plan sessions.');
+    const plan = Planner.readPlan({
+      date: document.getElementById('planDate').value, time: document.getElementById('planTime').value,
+      activity: document.getElementById('planActivity').value, note: document.getElementById('planNote').value,
+    });
+    const editing = this.editingPlan;
+    await Store.savePlan(editing, plan.startsAt, plan.activity, plan.note);
+    this.plannerWeek = Planner.weekOf(new Date(plan.startsAt));
+    await this.refreshAll();
+    this.showPlannerView('week');
+    UI.toast(editing ? 'Session updated' : 'Session planned. Others can join you now.', 'success');
+  }
+
+  async deletePlan(id) {
+    const plan = this.planById(id);
+    if (!plan) throw new Error('This session is no longer planned.');
+    const mine = plan.owner === this.user?.id;
+    const going = Planner.joiners(plan).length;
+    const what = `${mine ? 'your' : `${this.memberOf(plan.owner).name}'s`} ${plan.activity} session on ${Planner.formatDay(new Date(plan.starts_at))} at ${Planner.formatTime(plan.starts_at)}`;
+    if (!confirm(`Remove ${what}?${going ? ` ${going === 1 ? 'One person has' : `${going} people have`} joined it.` : ''}`)) return;
+    await Store.deletePlan(id);
+    await this.refreshAll();
+    UI.toast('Session removed', 'success');
+  }
+
+  async submitJoin() {
+    const plan = this.planById(this.viewingPlan);
+    if (!plan) throw new Error('This session is no longer planned.');
+    const joined = Planner.arrivalOf(plan, this.user?.id) != null;
+    const arrivesAt = Planner.readArrival(plan, document.getElementById('joinTime').value);
+    await Store.joinPlan(plan.id, true, arrivesAt);
+    await this.refreshAll();
+    this.showPlannerView('week');
+    UI.toast(joined ? `Your time is now ${Planner.formatTime(arrivesAt)}` : `You're in at ${Planner.formatTime(arrivesAt)} 💪`, 'success');
+  }
+
+  async leavePlan(id) {
+    await Store.joinPlan(id, false);
+    await this.refreshAll();
+    this.showPlannerView('week');
+    UI.toast("You've left the session", 'success');
   }
 
   // --- changelog ----------------------------------------------------------------

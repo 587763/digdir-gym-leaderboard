@@ -126,9 +126,43 @@ button:disabled, input:disabled { cursor: not-allowed; opacity: .6; transform: n
 .badge-chip.pending { filter: grayscale(0.2); opacity: 0.8; }
 .badge-chip.fresh { margin-left: 4px; }
 
-/* ---- member controls and board status -------------------------------------- */
-.controls { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 22px; }
+/* ---- member controls, the Friday lift and board status ---------------------- */
+.toolbar { display: flex; align-items: center; gap: 16px 28px; flex-wrap: wrap; margin-bottom: 22px; }
+.controls { display: flex; gap: 12px; flex-wrap: wrap; }
 body:not(.signed-in) .controls { display: none; }
+/* The Friday lift: a sticky note on the whiteboard, with a strip of tape. */
+.next-lift {
+  position: relative; display: flex; align-items: center; gap: 4px 20px; flex-wrap: wrap;
+  min-width: 0; max-width: 100%; padding: 10px 16px 10px 18px;
+  background: linear-gradient(172deg, #fff7b8, #fdeb86);
+  border-radius: 2px 2px 16px 2px;
+  box-shadow: 0 1px 0 rgba(0,0,0,.05), 4px 8px 14px rgba(120,90,0,.16);
+  transform: rotate(-0.8deg);
+}
+.next-lift::before {
+  content: ''; position: absolute; top: -9px; left: 32px; width: 72px; height: 18px;
+  background: rgba(255,255,255,.62); border: 1px solid rgba(0,0,0,.06); transform: rotate(2.5deg);
+}
+.next-lift-eyebrow { font: 700 .7rem/1.4 system-ui, sans-serif; text-transform: uppercase; letter-spacing: .14em; color: #7c5d00; }
+.next-lift-when { letter-spacing: .06em; }
+.next-lift-name { font-family: 'Permanent Marker', cursive; font-size: 1.6rem; line-height: 1.15; color: var(--ink); }
+.next-lift .btn { box-shadow: 1px 1px 0 rgba(0,0,0,.15); }
+/* Members also see the next planned session; it opens the planner on that session. */
+.next-session {
+  display: flex; flex-direction: column; align-items: flex-start; min-width: 0; max-width: 22rem;
+  padding: 0; font: inherit; color: inherit; text-align: left; background: none; border: 0;
+}
+/* A dashed line between the two parts, whichever comes first. */
+.next-lift > :nth-child(2):not(.btn) { padding-left: 18px; border-left: 2px dashed rgba(124,93,0,.35); }
+/* A session before Friday leads; the Friday lift is just its emoji (named in its tooltip). */
+.next-session.lead .next-session-what { font-size: 1.6rem; line-height: 1.15; }
+.next-lift-main.compact { display: flex; flex-direction: column; align-items: center; gap: 2px; cursor: default; }
+.next-lift-emoji { font-size: 1.5rem; line-height: 1; }
+button.next-session { cursor: pointer; }
+button.next-session:hover .next-session-what { color: var(--marker-blue); }
+.next-session-what { font-family: 'Permanent Marker', cursive; font-size: 1.15rem; line-height: 1.3; overflow-wrap: anywhere; }
+.next-session-who { font-family: 'Indie Flower', cursive; font-size: 1rem; color: #6b5a1e; }
+.tv-next-lift { display: none; }
 /* Role-gated controls: hidden by default, shown when the body has the matching class */
 .own-only, .claim-only, .review-only, .admin-only { display: none; }
 body.is-active  .own-only    { display: inline-flex; }
@@ -166,6 +200,17 @@ body.is-admin   .admin-only  { display: inline-flex; }
 .tab-btn.active::after { content: ''; position: absolute; bottom: -3px; left: 12px; right: 12px; height: 3px; border-radius: 50%; background: var(--marker-blue); }
 .tab-icon { margin-right: 6px; }
 
+/* This Friday's lift: a small sticky note on its board's top corner (taking no room from the
+   board), or one line on Other Lifts. */
+.leaderboard-section h2 .friday-tag { position: absolute; top: -12px; right: 18px; }
+.friday-tag {
+  display: inline-block; padding: 1px 8px 2px; vertical-align: middle; white-space: nowrap;
+  font: 700 .66rem/1.5 system-ui, sans-serif; letter-spacing: .1em; text-transform: uppercase; color: #7c5d00;
+  background: #fdeb86; border-radius: 2px 2px 8px 2px; box-shadow: 1px 2px 4px rgba(120,90,0,.14); transform: rotate(-2deg);
+}
+.friday-callout { margin: -6px 0 18px; font-family: 'Indie Flower', cursive; font-size: 1.1rem; color: var(--ink-soft); }
+.friday-callout .friday-tag { margin: 0 6px 0 0; }
+
 /* While ranking by bodyweight: how the boards are adjusted. */
 .mode-note { margin: -10px 0 20px; font-family: 'Indie Flower', cursive; font-size: 1.05rem; color: var(--ink-soft); }
 .mode-note strong { color: var(--marker-blue); }
@@ -183,7 +228,7 @@ body.is-admin   .admin-only  { display: inline-flex; }
 #other-tab .leaderboards { grid-template-columns: repeat(2, minmax(0, 1fr)); } /* four boards, two by two */
 #total-tab .leaderboard-section, #cardio-tab .leaderboard-section, #latest-tab .leaderboard-section { width: 100%; max-width: 820px; margin: 0 auto; }
 .leaderboard-section {
-  min-width: 0; background: rgba(255,255,255,.85); border: 2px solid var(--ink);
+  position: relative; min-width: 0; background: rgba(255,255,255,.85); border: 2px solid var(--ink);
   border-radius: var(--radius); padding: 20px 16px 12px;
   box-shadow: var(--shadow);
   transform: rotate(-0.3deg);
@@ -274,6 +319,106 @@ body.is-admin   .admin-only  { display: inline-flex; }
 .podium-spot.second { order: 1; }
 .podium-spot.third  { order: 3; }
 
+/* ---- planner (a dialog): a week of planned sessions ------------------------- */
+/* The week lays itself out by the room the dialog gives it, not by the screen. */
+.planner { container: planner / inline-size; }
+.planner-head { display: flex; align-items: center; justify-content: space-between; gap: 12px 20px; flex-wrap: wrap; margin-bottom: 16px; }
+.planner-nav { display: flex; align-items: center; gap: 10px; }
+.planner-title { font-family: 'Permanent Marker', cursive; font-size: 1.6rem; color: var(--marker-blue); min-width: 11ch; text-align: center; }
+.planner-span { display: block; font: 600 .78rem/1.4 system-ui, sans-serif; letter-spacing: .08em; text-transform: uppercase; color: var(--ink-soft); }
+.planner-step { font-size: 1.6rem; line-height: 1; padding: 4px 14px; }
+.planner-notice {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px 20px; flex-wrap: wrap;
+  margin-bottom: 16px; padding: 12px 18px; font-size: 1.2rem;
+  background: #eff6ff; border: 2px dashed var(--marker-blue); border-radius: 12px;
+}
+.planner-notice.warning { background: #fff7ed; border-color: var(--marker-amber); color: #9a3412; }
+.planner-loading { margin-bottom: 16px; color: var(--ink-soft); }
+.planner-week { list-style: none; display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 10px; }
+.planner-day {
+  display: flex; flex-direction: column; gap: 8px; min-width: 0; min-height: 190px;
+  padding: 10px 10px 12px; background: var(--panel); border: 2px dashed var(--line); border-radius: 12px;
+}
+.planner-day.today { border: 2px solid var(--marker-blue); background: #f5f8ff; }
+.planner-day.friday { background: #fffbe6; }
+.planner-day.past { opacity: .55; }
+.planner-day-head { display: flex; align-items: baseline; flex-wrap: wrap; gap: 0 6px; padding-bottom: 6px; border-bottom: 2px solid var(--line); }
+.planner-weekday { font-family: 'Permanent Marker', cursive; font-size: 1.2rem; }
+.planner-date { font-family: 'Caveat', cursive; font-size: 1.15rem; color: var(--ink-soft); }
+.planner-today { margin-left: auto; font: 700 .65rem/1.6 system-ui, sans-serif; text-transform: uppercase; letter-spacing: .12em; color: var(--marker-blue); }
+.friday-chip {
+  align-self: flex-start; justify-self: start; max-width: 100%; padding: 2px 10px 4px; font-family: 'Permanent Marker', cursive; font-size: 1rem; line-height: 1.3;
+  background: #fdeb86; border-radius: 2px 2px 10px 2px; transform: rotate(-1deg); box-shadow: 1px 2px 4px rgba(120,90,0,.14);
+}
+.friday-chip-label { display: block; font: 700 .6rem/1.6 system-ui, sans-serif; text-transform: uppercase; letter-spacing: .14em; color: #7c5d00; }
+.planner-plans { list-style: none; display: flex; flex-direction: column; gap: 8px; }
+.plan-card { position: relative; min-width: 0; padding: 8px 10px; background: #fff; border: 2px solid var(--line); border-radius: 10px; box-shadow: 1px 1px 0 rgba(0,0,0,.05); }
+.plan-card.mine { border-color: var(--marker-blue); }
+.plan-card.joined { border-color: var(--marker-green); background: #f3fbf5; }
+.plan-card.over { opacity: .7; border-style: dashed; }
+.plan-what { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 8px; line-height: 1.25; }
+.plan-time { font: 700 .85rem/1.5 system-ui, sans-serif; font-variant-numeric: tabular-nums; color: var(--marker-blue); }
+/* The title opens the session, like a name opens an athlete's story. */
+.plan-activity {
+  font: inherit; font-size: 1.25rem; font-weight: 700; color: inherit; text-align: left; overflow-wrap: anywhere;
+  background: none; border: 0; padding: 0; cursor: pointer;
+  text-decoration: underline dotted var(--line); text-underline-offset: 3px;
+}
+.plan-activity:hover { color: var(--marker-blue); text-decoration-color: var(--marker-blue); }
+.plan-note { margin-top: 2px; font-family: 'Indie Flower', cursive; font-size: .98rem; color: var(--ink-soft); overflow-wrap: anywhere; }
+.plan-people { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 8px; margin-top: 4px; font-size: 1.1rem; }
+.plan-host { display: inline-flex; align-items: center; gap: 4px; min-width: 0; font-weight: 600; overflow-wrap: anywhere; }
+.plan-host svg { flex: 0 0 auto; }
+.plan-joiners { min-width: 0; color: var(--marker-green); font-weight: 600; overflow-wrap: anywhere; }
+.plan-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+.plan-remove {
+  position: absolute; top: 2px; right: 4px; width: 26px; height: 26px; padding: 0; font-size: 1.2rem; line-height: 1;
+  color: var(--ink-soft); background: none; border: 0; border-radius: 50%; cursor: pointer; opacity: .55;
+}
+.plan-remove:hover, .plan-remove:focus-visible { color: var(--marker-red); opacity: 1; }
+.plan-card:has(.plan-remove) .plan-what { padding-right: 18px; }
+.plan-join { background: #fff; color: var(--marker-green); border-color: var(--marker-green); }
+.plan-join.joined { background: var(--marker-green); color: #fff; }
+/* One session: who comes when, and the time you'll come. */
+.plan-session { max-width: 560px; }
+.session-title { margin-top: 12px; font-family: 'Permanent Marker', cursive; font-size: 1.5rem; overflow-wrap: anywhere; }
+.session-title:focus { outline: none; }
+.session-when { font: 600 .85rem/1.6 system-ui, sans-serif; letter-spacing: .06em; text-transform: uppercase; color: var(--ink-soft); }
+.session-people { list-style: none; display: flex; flex-direction: column; gap: 6px; margin-bottom: 18px; }
+.session-people li { display: flex; align-items: center; gap: 10px; font-size: 1.2rem; }
+.session-people li svg { flex: 0 0 auto; }
+.session-people .plan-time { min-width: 3.2em; }
+.session-name { min-width: 0; font-weight: 600; overflow-wrap: anywhere; }
+.session-people .is-me .session-name { background: linear-gradient(transparent 58%, rgba(250, 204, 21, .5) 58%, rgba(250, 204, 21, .5) 92%, transparent 92%); }
+.join-form { padding-top: 12px; border-top: 2px dashed var(--line); }
+.join-form .form-group input { max-width: 12rem; }
+.join-form .field-hint { display: block; color: var(--ink-soft); }
+.planner-add {
+  margin-top: auto; padding: 4px; font-family: 'Caveat', cursive; font-size: 1.15rem; font-weight: 700; color: var(--ink-soft);
+  background: none; border: 2px dashed var(--line); border-radius: 10px; cursor: pointer;
+}
+.planner-add:hover { color: var(--marker-blue); border-color: var(--marker-blue); }
+.planner-empty { color: var(--ink-soft); font-family: 'Indie Flower', cursive; font-size: 1rem; }
+.plan-form { max-width: 560px; }
+/* Too narrow for seven columns: each day becomes a row, its sessions side by side. */
+@container planner (max-width: 1060px) {
+  .planner-week { grid-template-columns: 1fr; }
+  .planner-day { min-height: 0; display: grid; grid-template-columns: 9rem minmax(0, 1fr); gap: 8px 14px; align-items: start; }
+  .planner-day > :not(.planner-day-head) { grid-column: 2; }
+  .planner-day-head { grid-row: 1 / span 3; flex-direction: column; border-bottom: 0; padding-bottom: 0; }
+  .planner-today { margin-left: 0; }
+  .planner-plans { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 250px), 1fr)); }
+  .planner-add { justify-self: start; margin-top: 0; padding: 2px 16px; }
+}
+/* Phone width: one column, each day's heading on top. */
+@container planner (max-width: 520px) {
+  .planner-day { grid-template-columns: 1fr; }
+  .planner-day > :not(.planner-day-head) { grid-column: 1; }
+  .planner-day-head { grid-row: auto; flex-direction: row; }
+  .planner-today { margin-left: auto; }
+  .planner-head > .btn { width: 100%; }
+}
+
 /* ---- hints and empty states ------------------------------------------------ */
 .hint { text-align: center; color: var(--ink-soft); font-family: 'Indie Flower', cursive; font-size: 1.05rem; margin-top: 18px; }
 .empty-state { text-align: center; color: var(--ink-soft); padding: 40px 8px; font-size: 1.15rem; }
@@ -296,6 +441,7 @@ body.is-admin   .admin-only  { display: inline-flex; }
 }
 .modal-content:focus { outline: none; }
 .modal-large { max-width: 760px; }
+.modal-wide { max-width: 1400px; }
 @keyframes popIn { from { transform: scale(.96); opacity: 0; } to { transform: none; opacity: 1; } }
 .modal-content h2 { padding-right: 36px; font-family: 'Permanent Marker', cursive; font-size: 1.8rem; margin-bottom: 18px; color: var(--marker-blue); }
 .close {
@@ -317,7 +463,12 @@ body.is-admin   .admin-only  { display: inline-flex; }
   width: 100%; font-family: 'Caveat', cursive; font-size: 1.25rem;
   padding: 8px 12px; border: 2px solid var(--line); border-radius: 10px; background: #fff; color: var(--ink);
 }
-.form-group input:focus { outline: none; border-color: var(--marker-blue); }
+.form-group textarea {
+  width: 100%; font-family: 'Caveat', cursive; font-size: 1.25rem; resize: vertical;
+  padding: 8px 12px; border: 2px solid var(--line); border-radius: 10px; background: #fff; color: var(--ink);
+}
+.form-group input:focus, .form-group textarea:focus { outline: none; border-color: var(--marker-blue); }
+.plan-friday { margin: -10px 0 8px; }
 .form-section-title { font-family: 'Permanent Marker', cursive; font-size: 1.2rem; margin: 8px 0 10px; }
 .lift-fields { border: 0; min-width: 0; }
 .lift-fields legend { padding: 0; }
@@ -483,7 +634,13 @@ body.is-admin   .admin-only  { display: inline-flex; }
   html:not(.tv-mode) .tv-toggle { display: none; }
   .auth-user { font-size: 1.05rem; padding: 2px 10px; }
   .header-actions .btn { font-size: 1.05rem; padding: 4px 12px; }
-  .controls { gap: 8px; margin-bottom: 14px; }
+  .toolbar { gap: 14px; margin-bottom: 14px; }
+  .controls { gap: 8px; }
+  .next-lift { width: 100%; transform: rotate(-0.5deg); }
+  .next-lift-name { font-size: 1.4rem; }
+  .next-session { width: 100%; max-width: none; }
+  .next-lift > :nth-child(2):not(.btn, .compact) { width: 100%; padding: 8px 0 0; border-left: 0; border-top: 2px dashed rgba(124,93,0,.35); }
+  .next-lift > :nth-child(2).compact { padding-left: 0; border-left: 0; flex-direction: row; align-items: center; gap: 6px; }
   .controls .btn { font-size: 1.05rem; padding: 6px 12px; }
   .toast-region { left: 14px; right: 14px; bottom: 14px; max-width: none; }
   .header-titles h1 { font-size: 1.85rem; gap: 8px; }
@@ -523,6 +680,7 @@ html.tv-mode, .tv-mode body { height: 100vh; overflow: hidden; }
 
 /* A TV is read-only — drop the interactive chrome and tap hints. */
 .tv-mode .controls,
+.tv-mode .next-lift,
 .tv-mode .auth-area,
 .tv-mode .bodyweight-toggle,
 .tv-mode .mode-note,
@@ -541,6 +699,30 @@ html.tv-mode, .tv-mode body { height: 100vh; overflow: hidden; }
 /* Compact header so the board claims the height. */
 .tv-mode header { margin-bottom: 12px; }
 .tv-mode .header-titles h1 { font-size: 2.4rem; }
+/* The Friday note as one sticky line in the header (clear of the exit button): this Friday's
+   lift, and on a TV signed in as a member the next session too, as on the note. */
+.tv-mode .header-top { flex-wrap: nowrap; }
+.tv-mode .header-titles { flex: 0 0 auto; }
+.tv-mode .tv-next-lift {
+  display: flex; align-self: center; min-width: 0; overflow: hidden; margin: 0 11rem 0 auto;
+  padding: 4px 18px 6px; font-family: 'Permanent Marker', cursive; font-size: 1.7rem; color: var(--ink);
+  background: linear-gradient(172deg, #fff7b8, #fdeb86); border-radius: 2px 2px 14px 2px;
+  box-shadow: 3px 6px 12px rgba(120,90,0,.16); transform: rotate(-1deg);
+}
+.tv-mode .tv-note { display: flex; align-items: center; gap: 2px 22px; min-width: 0; }
+.tv-mode .tv-part { display: flex; align-items: baseline; gap: .4em; flex: 0 0 auto; white-space: nowrap; }
+.tv-mode .tv-session { flex-shrink: 1; min-width: 0; }
+.tv-mode .tv-part + .tv-part { padding-left: 22px; border-left: 2px dashed rgba(124,93,0,.35); }
+.tv-mode .tv-next-lift-when { font: 700 .75rem/1 system-ui, sans-serif; text-transform: uppercase; letter-spacing: .14em; color: #7c5d00; }
+.tv-mode .tv-session:not(.lead), .tv-mode .tv-friday.compact { font-size: 1.25rem; }
+.tv-mode .tv-friday.compact { flex-direction: column; align-items: center; gap: 2px; }
+.tv-mode .tv-session-what { flex: 0 1 auto; min-width: 2em; overflow: hidden; text-overflow: ellipsis; }
+.tv-mode .tv-session-who { font-family: 'Indie Flower', cursive; font-size: .65em; color: #6b5a1e; }
+/* Narrower TVs: the Friday lift and a session after it stack, so the note stays beside the title. */
+@media (max-width: 1500px) {
+  .tv-mode .tv-note.friday-first { flex-direction: column; align-items: flex-start; }
+  .tv-mode .tv-note.friday-first .tv-part + .tv-part { padding-left: 0; border-left: 0; }
+}
 
 /* The 📺 button becomes a faint, always-available exit in the corner. */
 .tv-mode .tv-toggle { position: fixed; top: 12px; right: 12px; z-index: 50; opacity: 0.2; transition: opacity .15s ease; }
@@ -555,7 +737,7 @@ html.tv-mode, .tv-mode body { height: 100vh; overflow: hidden; }
 
 /* Active tab fills the remaining height and clips rather than scrolls. */
 .tv-mode .tab-content.active { flex: 1; min-height: 0; overflow: hidden; display: flex; flex-direction: column; position: relative; }
-.tv-mode .leaderboards { align-content: start; }
+.tv-mode .leaderboards { align-content: start; padding-top: 14px; } /* room for a board's Friday sticker */
 .tv-mode .leaderboard-section { transform: none; }
 .tv-mode .hall-table th, .tv-mode .hall-table td { width: auto; text-align: left; overflow-wrap: anywhere; }
 .tv-mode .hall-of-fame { justify-content: center; }

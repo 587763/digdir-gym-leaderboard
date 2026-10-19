@@ -26,6 +26,7 @@
   const ATHLETE_COLUMNS = 'id, name, bench, squat, deadlift, lifts, achievements, bodyweight, archived_at, updated_at';
   const PROFILE_COLUMNS = 'user_id, github_login, display_name, is_admin, status, athlete_id';
   const PROPOSAL_COLUMNS = 'id, kind, approval, athlete_id, proposer, payload, status, created_at';
+  const PLAN_COLUMNS = 'id, owner, starts_at, activity, note, plan_joins(user_id, arrives_at, created_at)';
 
   const connected = () => {
     if (!client) throw new Error('Not connected to the leaderboard database.');
@@ -118,6 +119,14 @@
         .order('decided_at', { ascending: true }));
     },
 
+    // Planned sessions starting in [from, to), each with who joins it. Members only (0010):
+    // RLS returns no rows to visitors and to members not yet on the board.
+    async listPlans(from, to) {
+      if (!client) return [];
+      return rows(client.from('plans').select(PLAN_COLUMNS)
+        .gte('starts_at', from).lt('starts_at', to).order('starts_at'));
+    },
+
     // --- governed writes (RPCs enforce all the rules) -----------------------
     async propose(kind, athleteId, payload) {
       return rows(connected().rpc('propose', { p_kind: kind, p_athlete: athleteId, p_payload: payload || {} }));
@@ -144,6 +153,20 @@
     // A linked member shares, changes or clears (null) their own bodyweight, without review (0008).
     async setMyBodyweight(kg) {
       const { error } = await connected().rpc('set_my_bodyweight', { p_bodyweight: kg });
+      if (error) throw error;
+    },
+
+    // Planner (0010): create (id null) or change your own plan, remove it, join one (coming at
+    // arrivesAt; joining again changes the time) or leave it.
+    async savePlan(id, startsAt, activity, note) {
+      return rows(connected().rpc('save_plan', { p_id: id, p_starts_at: startsAt, p_activity: activity, p_note: note }));
+    },
+    async deletePlan(id) {
+      const { error } = await connected().rpc('delete_plan', { p_id: id });
+      if (error) throw error;
+    },
+    async joinPlan(id, join, arrivesAt = null) {
+      const { error } = await connected().rpc('join_plan', { p_id: id, p_join: join, p_arrives_at: arrivesAt });
       if (error) throw error;
     },
 
@@ -181,7 +204,13 @@
         .on('postgres_changes', { event: '*', schema: 'public', table: 'proposals' }, cb)
         .on('postgres_changes', { event: '*', schema: 'public', table: 'profiles' }, cb)
         .subscribe(onStatus);
-      return () => client.removeChannel(channel);
+      // The planner has a channel of its own, so trouble there never stops the boards' updates.
+      const planner = client
+        .channel('planner-changes')
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'plans' }, cb)
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'plan_joins' }, cb)
+        .subscribe();
+      return () => { client.removeChannel(channel); client.removeChannel(planner); };
     },
   };
 })();

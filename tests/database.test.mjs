@@ -7,7 +7,7 @@ let db;
 const ids = Object.fromEntries(['admin','member','peer','pending','blocked','missing','deputy','newcomer','reviewer'].map((key,i)=>[key,`00000000-0000-4000-8000-${String(i+1).padStart(12,'0')}`]));
 const governance='supabase/migrations/0005_governance_hardening.sql', safeguards='supabase/migrations/0006_member_safeguards.sql',
   archiving='supabase/migrations/0007_archive_athletes.sql', bodyweights='supabase/migrations/0008_bodyweight.sql',
-  curls='supabase/migrations/0009_strict_curl.sql';
+  curls='supabase/migrations/0009_strict_curl.sql', planner='supabase/migrations/0010_planner.sql';
 let athletes, freshCatalog;
 async function as(user) {
   await db.exec('reset role');
@@ -21,6 +21,14 @@ async function decide(id, approve=true) { return db.query('select public.decide(
 async function withdraw(id) { return db.query('select public.withdraw($1)',[id]); }
 async function restore() { return (await db.query('select public.restore_my_athlete() as id')).rows[0].id; }
 async function setBodyweight(kg) { return db.query('select public.set_my_bodyweight($1)',[kg]); }
+// A plan starting at an SQL time expression such as "now() + interval '1 day'".
+async function savePlan(start, activity='Squat', note=null, id=null) {
+  return (await db.query(`select public.save_plan($1,${start},$2,$3) as id`,[id,activity,note])).rows[0].id;
+}
+// Joins at an SQL time expression (null: at the plan's start), or leaves with join false.
+async function joinPlan(id, join=true, arrives='null') { return db.query(`select public.join_plan($1,$2,${arrives})`,[id,join]); }
+async function deletePlan(id) { return db.query('select public.delete_plan($1)',[id]); }
+const visiblePlans=async()=>(await db.query('select id from plans')).rows.length;
 // Rows as stored, read past RLS.
 async function stored(sql,params=[]) { await db.exec('reset role'); return (await db.query(sql,params)).rows; }
 // Admins archive and restore athletes with ordinary updates.
@@ -57,7 +65,7 @@ async function catalog(pg) {
 const fresh=()=>freshCatalog??=database().then(async(pg)=>{try{return await catalog(pg);}finally{await pg.close();}});
 before(async()=>{
   db = await database();
-  for(const file of [governance,governance,safeguards,safeguards,archiving,archiving,bodyweights,bodyweights,curls,curls]) await db.exec(read(file));
+  for(const file of [governance,governance,safeguards,safeguards,archiving,archiving,bodyweights,bodyweights,curls,curls,planner,planner]) await db.exec(read(file));
   await db.exec('grant usage on schema public,auth to authenticated,anon; grant select,insert,update,delete on all tables in schema public to authenticated; grant select on all tables in schema public to anon;');
   for(const [name,id] of Object.entries(ids)) {
     if(name==='missing') continue;
@@ -84,6 +92,92 @@ test('fresh schema already contains every migrated definition',async()=>{
   assert.ok(def('athletes.bodyweight')&&def('set_my_bodyweight(numeric)'));
   assert.equal(def('proposals.proposer'),'uuid YES');
   assert.match(def('proposals.proposals_proposer_fkey'),/ON DELETE SET NULL/);
+  assert.ok(def('plans.starts_at')&&def('plan_joins.members read plan joins')&&def('save_plan(uuid,timestamp with time zone,text,text)'));
+});
+test('only members on the board see plans, and they change them only through the planner functions',async()=>{
+  await as('member');
+  const tomorrow=`'${new Date(Date.now()+86400000).toISOString()}'::timestamptz`;
+  const id=await savePlan(tomorrow,'  Squat  ','  ');
+  assert.equal(await savePlan(tomorrow,'Squat'),id,'a retried save adds nothing');
+  assert.deepEqual((await stored('select owner,activity,note from plans where id=$1',[id]))[0],{owner:ids.member,activity:'Squat',note:null});
+  await as('peer');
+  assert.equal(await visiblePlans(),1);
+  await joinPlan(id); await joinPlan(id);
+  assert.deepEqual((await db.query('select user_id from plan_joins where plan_id=$1',[id])).rows,[{user_id:ids.peer}]);
+  // Visitors, members awaiting a spot and blocked accounts see nothing and can't take part.
+  await db.exec('reset role; set role anon');
+  assert.equal(await visiblePlans(),0);
+  for(const user of ['pending','blocked']) {
+    await as(user);
+    assert.equal(await visiblePlans(),0,user);
+    await assert.rejects(()=>savePlan("now() + interval '1 day'"),user==='blocked'?/blocked/:/claim your spot/);
+    await assert.rejects(()=>joinPlan(id),user==='blocked'?/blocked/:/claim your spot/);
+  }
+  // No direct writes: RLS has no write policies for plans or joins.
+  await as('member');
+  await assert.rejects(()=>db.query("insert into plans(owner,starts_at,activity) values($1,now(),'Sneaky')",[ids.member]),/row-level security/);
+  await assert.rejects(()=>db.query('insert into plan_joins(plan_id,user_id,arrives_at) values($1,$2,now())',[id,ids.member]),/row-level security/);
+  assert.equal((await db.query("update plans set activity='Changed' where id=$1 returning id",[id])).rows.length,0);
+  assert.equal((await db.query('delete from plan_joins returning plan_id')).rows.length,0);
+  await assert.rejects(()=>joinPlan(id),/your own plan/);
+  // Only the owner changes a plan; the owner or an admin removes it.
+  await as('peer');
+  await assert.rejects(()=>savePlan("now() + interval '2 days'",'Bench',null,id),/only change your own/);
+  await assert.rejects(()=>deletePlan(id),/only remove your own/);
+  await as('member');
+  assert.equal(await savePlan("now() + interval '2 days'",'Bench','Need a spotter',id),id);
+  assert.deepEqual((await stored('select activity,note,(select count(*)::int from plan_joins where plan_id=$1) as joins from plans where id=$1',[id]))[0],
+    {activity:'Bench',note:'Need a spotter',joins:1});
+  await as('peer'); await joinPlan(id,false);
+  await as('admin'); await deletePlan(id);
+  assert.equal((await stored('select count(*)::int as n from plans')).at(0).n,0);
+  await assert.rejects(()=>deletePlan(id),/not found/);
+});
+test('people join at their own time, within six hours of the start, and move with the session',async()=>{
+  await as('member');
+  const id=await savePlan("date_trunc('hour', now()) + interval '1 day'",'Squat');
+  // Minutes after the start the peer comes.
+  const arrival=async()=>(await stored('select (extract(epoch from arrives_at - (select starts_at from plans where id=$1)) / 60)::int as late from plan_joins where plan_id=$1 and user_id=$2',[id,ids.peer]))[0]?.late;
+  await as('peer');
+  await joinPlan(id);
+  assert.equal(await arrival(),0,'no time given: at the start');
+  await joinPlan(id,true,`(select starts_at + interval '30 minutes' from plans where id='${id}')`);
+  assert.equal(await arrival(),30,'joining again changes the time');
+  await assert.rejects(()=>joinPlan(id,true,`(select starts_at + interval '7 hours' from plans where id='${id}')`),/six hours/);
+  await assert.rejects(()=>joinPlan(id,true,`(select starts_at - interval '6 hours 1 minute' from plans where id='${id}')`),/six hours/);
+  await joinPlan(id,true,`(select starts_at - interval '45 minutes' from plans where id='${id}')`);
+  // The owner moves the session a day later: arrivals keep their place relative to it.
+  await as('member');
+  await savePlan("date_trunc('hour', now()) + interval '2 days'",'Squat',null,id);
+  assert.equal(await arrival(),-45);
+  assert.equal((await stored('select count(*)::int as n from plan_joins where plan_id=$1',[id]))[0].n,1);
+  await deletePlan(id);
+});
+test('plans are checked like the planner form, and a session closes two hours after it starts',async()=>{
+  await as('member');
+  await assert.rejects(()=>savePlan("now() - interval '3 hours'"),/has passed/);
+  await assert.rejects(()=>savePlan("now() + interval '61 days'"),/60 days/);
+  await assert.rejects(()=>savePlan('null::timestamptz'),/has passed/);
+  for(const activity of ['   ',null,'x'.repeat(61)]) await assert.rejects(()=>savePlan("now() + interval '1 day'",activity),/1 to 60/);
+  await assert.rejects(()=>savePlan("now() + interval '1 day'",'Squat','x'.repeat(201)),/200/);
+  const now=await savePlan("now() - interval '1 hour'",'At the gym now');
+  await as('peer'); await joinPlan(now);
+  await db.exec('reset role');
+  await db.query("update plans set starts_at=now() - interval '3 hours' where id=$1",[now]);
+  await as('peer');
+  await assert.rejects(()=>joinPlan(now,true),/over/);
+  await joinPlan(now,false);
+  // At most 20 upcoming plans each.
+  await db.exec('reset role');
+  await db.query("insert into plans(owner,starts_at,activity) select $1,now() + make_interval(days => n),'Filler' from generate_series(1,20) n",[ids.member]);
+  await as('member');
+  await assert.rejects(()=>savePlan("now() + interval '30 days'",'One more'),/20 upcoming/);
+  // A deleted account takes its plans and joins with it.
+  await as('peer'); const peerPlan=await savePlan("now() + interval '3 days'",'Deadlift');
+  await as('member'); await joinPlan(peerPlan);
+  await db.exec('reset role');
+  await db.query('delete from plans');
+  assert.equal((await db.query('select count(*)::int as n from plan_joins')).rows[0].n,0);
 });
 test('signup without metadata succeeds and cannot bootstrap an admin',async()=>{
   await db.exec('reset role');
@@ -481,7 +575,8 @@ test('fresh schema and migration use identical governance functions',()=>{
   // Each function is compared with the migration that last defines it.
   for(const [file,names] of [[governance,['handle_new_user','is_admin']],
     [safeguards,['validate_athlete_values','protect_last_admin']],
-    [archiving,['propose','decide','withdraw','restore_my_athlete']],[bodyweights,['set_my_bodyweight']],[curls,['lift_allows_decimals']]]) {
+    [archiving,['propose','decide','withdraw','restore_my_athlete']],[bodyweights,['set_my_bodyweight']],[curls,['lift_allows_decimals']],
+    [planner,['can_plan','save_plan','delete_plan','join_plan']]]) {
     for(const name of names) assert.equal(extract(read('supabase/schema.sql'),name),extract(read(file),name),`${file}: ${name}`);
   }
 });
@@ -575,4 +670,22 @@ test('upgrading 0008 to 0009 gives strict curls one decimal and matches the fres
   await as('member');
   await assert.rejects(()=>propose('pr',athletes[0].id,{lift:'strictcurl',value:42.55}),/one decimal/);
   await withdraw(await propose('pr',athletes[0].id,{lift:'strictcurl',value:42.5}));
+});
+test('upgrading 0009 to 0010 adds the planner, preserves rows and matches the fresh schema',async()=>{
+  // Continues from the 0009 database the previous test upgraded, without the planner.
+  await db.exec(`reset role;
+    drop table plan_joins, plans;
+    drop function can_plan(), save_plan(uuid,timestamptz,text,text), delete_plan(uuid), join_plan(uuid,boolean,timestamptz);`);
+  const before=await allRows();
+  await db.exec(read(planner));
+  await db.exec(read(planner));
+  assert.deepEqual(await allRows(),before);
+  assert.deepEqual(await catalog(db),await fresh());
+  assert.deepEqual((await db.query("select tablename from pg_publication_tables where pubname='supabase_realtime' and tablename like 'plan%' order by 1")).rows.map((r)=>r.tablename),['plan_joins','plans']);
+  // Supabase grants new tables to its API roles by default; RLS decides what they may do.
+  await db.exec('grant select,insert,update,delete on plans,plan_joins to authenticated; grant select on plans,plan_joins to anon;');
+  await as('member');
+  const id=await savePlan("now() + interval '1 day'",'Squat');
+  await as('peer'); await joinPlan(id);
+  assert.equal(await visiblePlans(),1);
 });

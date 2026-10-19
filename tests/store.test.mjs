@@ -45,3 +45,19 @@ test('bodyweight is saved through its RPC and failures propagate',async()=>{
   await assert.rejects(()=>store.setMyBodyweight(null),/denied/);
   assert.deepEqual(calls,[['set_my_bodyweight',{p_bodyweight:82.5}],['set_my_bodyweight',{p_bodyweight:null}]]);
 });
+test('plans are read for a time span and written through their RPCs',async()=>{
+  const calls=[];
+  const query={select(columns){calls.push(['select',columns]);return this;},gte(...a){calls.push(['gte',...a]);return this;},lt(...a){calls.push(['lt',...a]);return this;},
+    order(column){calls.push(['order',column]);return Promise.resolve({data:[{id:'p'}],error:null});}};
+  const store=storeWith({from:(table)=>{calls.push(['from',table]);return query;},rpc:async(name,args)=>{calls.push([name,{...args}]);return {data:name==='save_plan'?'p':null,error:name==='join_plan'?new Error('denied'):null};}});
+  assert.deepEqual(await store.listPlans('2026-10-19T00:00:00Z','2026-12-21T00:00:00Z'),[{id:'p'}]);
+  assert.equal(await store.savePlan(null,'2026-10-23T14:00:00Z','Bench',null),'p');
+  await store.deletePlan('p');
+  await assert.rejects(()=>store.joinPlan('p',true,'2026-10-23T14:30:00Z'),/denied/);
+  assert.deepEqual(calls.map((c)=>JSON.parse(JSON.stringify(c))),[
+    ['from','plans'],['select','id, owner, starts_at, activity, note, plan_joins(user_id, arrives_at, created_at)'],
+    ['gte','starts_at','2026-10-19T00:00:00Z'],['lt','starts_at','2026-12-21T00:00:00Z'],['order','starts_at'],
+    ['save_plan',{p_id:null,p_starts_at:'2026-10-23T14:00:00Z',p_activity:'Bench',p_note:null}],
+    ['delete_plan',{p_id:'p'}],['join_plan',{p_id:'p',p_join:true,p_arrives_at:'2026-10-23T14:30:00Z'}],
+  ]);
+});

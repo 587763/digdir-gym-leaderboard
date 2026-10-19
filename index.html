@@ -13,7 +13,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Permanent+Marker&family=Caveat:wght@400;600;700&family=Indie+Flower&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="styles.css?v=3.5.0">
+  <link rel="stylesheet" href="styles.css?v=3.6.0">
 </head>
 <body>
   <svg class="svg-defs" width="0" height="0" aria-hidden="true">
@@ -38,6 +38,8 @@
           <h1><img src="favicon.svg" width="48" height="48" alt=""> Gym Leaderboard<span class="title-period">.</span></h1>
           <p class="subtitle">Good lifts. Great company. A little friendly competition.</p>
         </div>
+        <!-- TV only: this Friday's lift, in the header so it takes no room from the boards -->
+        <p id="tvNextLift" class="tv-next-lift" aria-hidden="true"></p>
         <div class="header-actions">
           <button type="button" id="bodyweightBtn" class="btn btn-ghost bodyweight-toggle" data-action="toggle-bodyweight" aria-pressed="false" title="Rank the boards by bodyweight instead of weight lifted, for athletes who share theirs">⚖️ Bodyweight ranking</button>
           <button type="button" id="tvModeBtn" class="btn btn-ghost tv-toggle" data-action="toggle-tv" title="Big-screen / TV display — full screen, auto-cycles tabs">📺 TV mode</button>
@@ -46,12 +48,16 @@
       </div>
     </header>
 
-    <div class="controls">
-      <button type="button" id="myAthleteBtn" class="btn btn-primary own-only" data-action="open-mine">🏋️ My PRs</button>
-      <button type="button" id="claimBtn" class="btn btn-primary claim-only" data-action="open-claim">🙋 Claim your spot</button>
-      <button type="button" id="reviewBtn" class="btn btn-secondary review-only" data-action="open-review">📋 Review <span id="reviewCount" class="count-badge" hidden>0</span></button>
-      <button type="button" id="adminBtn" class="btn btn-secondary admin-only" data-action="open-members">🛡️ Admin</button>
-      <button type="button" id="manageAthletesBtn" class="btn btn-secondary admin-only" data-action="open-athletes">👥 Athletes</button>
+    <div class="toolbar">
+      <div class="controls">
+        <button type="button" id="myAthleteBtn" class="btn btn-primary own-only" data-action="open-mine">🏋️ My PRs</button>
+        <button type="button" id="claimBtn" class="btn btn-primary claim-only" data-action="open-claim">🙋 Claim your spot</button>
+        <button type="button" id="reviewBtn" class="btn btn-secondary review-only" data-action="open-review">📋 Review <span id="reviewCount" class="count-badge" hidden>0</span></button>
+        <button type="button" id="adminBtn" class="btn btn-secondary admin-only" data-action="open-members">🛡️ Admin</button>
+        <button type="button" id="manageAthletesBtn" class="btn btn-secondary admin-only" data-action="open-athletes">👥 Athletes</button>
+      </div>
+      <!-- The Friday lift (js/planner.js) for everyone, the next session for members, and the planner -->
+      <section id="nextLift" class="next-lift" aria-label="Friday lift and planner"></section>
     </div>
 
     <!-- A returning member whose athlete was archived can bring it back -->
@@ -207,6 +213,59 @@
       </div>
     </dialog>
 
+    <!-- Planner (js/planner.js), opened from the Friday note: a week of sessions, or the form to plan one -->
+    <dialog id="plannerModal" class="modal" aria-labelledby="plannerTitle">
+      <div class="modal-content modal-wide" tabindex="-1" autofocus>
+        <button type="button" class="close" data-action="close-dialog" aria-label="Close dialog">&times;</button>
+        <h2 id="plannerTitle">📅 Gym planner</h2>
+        <p class="modal-intro">Say when you're heading to the gym and what you'll do, and tap 🙋 I'm in to join someone. Members on the board see the plans.</p>
+        <div id="plannerBody" class="planner"></div>
+        <!-- One session: who comes when (re-rendered), and the time you'll come (static, so a refresh keeps what you typed) -->
+        <section id="planSession" class="plan-session" aria-labelledby="planSessionTitle" hidden>
+          <button type="button" class="btn btn-ghost btn-small" data-action="plan-back">‹ Back to the week</button>
+          <div id="planSessionBody"></div>
+          <form id="joinForm" class="join-form">
+            <div class="form-group">
+              <label for="joinTime">I'll come at</label>
+              <input type="time" id="joinTime" required aria-describedby="joinHint">
+              <span class="field-hint" id="joinHint"></span>
+            </div>
+            <div class="form-actions">
+              <button type="submit" class="btn btn-primary" id="joinSubmit">🙋 I'm in</button>
+              <button type="button" class="btn btn-secondary" id="joinLeave" data-action="plan-leave" hidden>Leave</button>
+            </div>
+          </form>
+        </section>
+        <form id="planForm" class="plan-form" aria-labelledby="planFormTitle" hidden>
+          <h3 id="planFormTitle" class="form-section-title">Plan a session</h3>
+          <div class="form-row">
+            <div class="form-group">
+              <label for="planDate">Day</label>
+              <input type="date" id="planDate" required aria-describedby="planFriday">
+            </div>
+            <div class="form-group">
+              <label for="planTime">Time</label>
+              <input type="time" id="planTime" required>
+            </div>
+          </div>
+          <p class="field-hint plan-friday" id="planFriday" aria-live="polite"></p>
+          <div class="form-group">
+            <label for="planActivity">What you'll do</label>
+            <input type="text" id="planActivity" maxlength="60" required list="planActivities" autocomplete="off" placeholder="Squat, upper body, a 5 km run…">
+            <datalist id="planActivities"></datalist>
+          </div>
+          <div class="form-group">
+            <label for="planNote">Note <span class="unit">(optional)</span></label>
+            <textarea id="planNote" maxlength="200" rows="2" placeholder="Need a spotter? Going for a PR?"></textarea>
+          </div>
+          <div class="form-actions">
+            <button type="submit" class="btn btn-primary">Save</button>
+            <button type="button" class="btn btn-secondary" data-action="plan-back">Back to the week</button>
+          </div>
+        </form>
+      </div>
+    </dialog>
+
     <!-- Leaderboards: sections are generated from the exercise registry (js/lifts.js) -->
     <div class="tab-content active" id="lifts-tab" role="tabpanel" aria-labelledby="tab-lifts" tabindex="-1">
       <div class="leaderboards" data-board-group="main"></div>
@@ -218,6 +277,8 @@
     </div>
 
     <div class="tab-content" id="other-tab" role="tabpanel" aria-labelledby="tab-other" tabindex="-1">
+      <!-- When other lifts are this Friday's lift (main lifts get a sticker on their board instead) -->
+      <p id="otherFriday" class="friday-callout" hidden></p>
       <div class="leaderboards" data-board-group="other"></div>
       <p class="hint">Every lift counts. Tap a name to see their story.</p>
     </div>
@@ -241,16 +302,17 @@
     src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.107.0/dist/umd/supabase.js"
     integrity="sha384-CQbEv3UOeYwlaBLdPF5KqEagCP39Q1KpvJC6Gwa3UGjZAwMvpA+0TFxSSnrgb4MX"
     crossorigin="anonymous"></script>
-  <script src="js/config.js?v=3.5.0"></script>
-  <script src="js/ui.js?v=3.5.0"></script>
-  <script src="js/achievements.js?v=3.5.0"></script>
-  <script src="js/changelog.js?v=3.5.0"></script>
-  <script src="js/lifts.js?v=3.5.0"></script>
-  <script src="js/avatar.js?v=3.5.0"></script>
-  <script src="js/store.js?v=3.5.0"></script>
-  <script src="js/history.js?v=3.5.0"></script>
-  <script src="js/board.js?v=3.5.0"></script>
-  <script src="js/tv.js?v=3.5.0"></script>
-  <script src="js/app.js?v=3.5.0"></script>
+  <script src="js/config.js?v=3.6.0"></script>
+  <script src="js/ui.js?v=3.6.0"></script>
+  <script src="js/achievements.js?v=3.6.0"></script>
+  <script src="js/changelog.js?v=3.6.0"></script>
+  <script src="js/lifts.js?v=3.6.0"></script>
+  <script src="js/avatar.js?v=3.6.0"></script>
+  <script src="js/store.js?v=3.6.0"></script>
+  <script src="js/history.js?v=3.6.0"></script>
+  <script src="js/board.js?v=3.6.0"></script>
+  <script src="js/planner.js?v=3.6.0"></script>
+  <script src="js/tv.js?v=3.6.0"></script>
+  <script src="js/app.js?v=3.6.0"></script>
 </body>
 </html>
