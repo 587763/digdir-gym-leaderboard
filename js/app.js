@@ -252,6 +252,10 @@ class LeaderboardApp {
       document.getElementById('hallOfFame').innerHTML = BoardView.hallOfFame(ctx);
       this.renderPlanner();
     });
+    // TV only: the latest PRs under every tab.
+    const strip = document.getElementById('tvLatest');
+    strip.innerHTML = BoardView.latestStrip(ctx);
+    strip.hidden = ctx.latest.length === 0;
     this.updateReviewCount();
     this.updateBoardStatus();
     if (this.tv.enabled) this.tv.fit();

@@ -78,6 +78,22 @@ const CHECK_TV = `(() => {
     }
   }
   if (seen.size !== rows.length) problems.push((rows.length - seen.size) + ' ranked rows never shown on any page');
+  // The latest PRs line: on every tab, showing whole items only (the rest wrap out of sight), and
+  // names that fit without clipping their letters.
+  const strip = document.getElementById('tvLatest');
+  if (!strip.hidden && !document.documentElement.classList.contains('tv-latest-withdrawn')) {
+    const line = strip.getBoundingClientRect();
+    if (!strip.getClientRects().length) problems.push('latest PRs line is missing');
+    const shown = [...strip.querySelectorAll('.tv-latest-item')].filter((li) => li.getBoundingClientRect().top < line.bottom - 1);
+    if (shown.length === 0) problems.push('no latest PR fits its line');
+    for (const li of shown) {
+      const b = li.getBoundingClientRect();
+      if (b.right > line.right + 1 || b.bottom > line.bottom + 1) problems.push('latest PR cut off: ' + li.textContent.trim().slice(0, 30));
+      const name = li.querySelector('.tv-latest-name');
+      if (name.scrollHeight > name.clientHeight + 1) problems.push('latest PR name clipped: ' + name.textContent);
+    }
+    if (line.bottom > innerHeight + 1) problems.push('latest PRs line below the screen');
+  }
   app.tv.page = 0; app.tv.applyPage();
   return problems;
 })()`;

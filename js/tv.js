@@ -135,7 +135,11 @@ window.TvDisplay = class TvDisplay {
     if (!this.enabled || !frame) { this.pages = 1; return; }
     const previousPages = this.pages;
     const previousPage = this.page;
-    const bottom = frame.getBoundingClientRect().bottom - TvDisplay.PAGE_PAD;
+    // The latest-PRs line along the bottom takes its room back on every fit; below, it gives
+    // way on this tab if a ranked row could not fit beside it.
+    const root = document.documentElement;
+    root.classList.remove('tv-latest-withdrawn');
+    let bottom = frame.getBoundingClientRect().bottom - TvDisplay.PAGE_PAD;
     // Reconsider podiums after fonts, available height or the active tab change.
     for (const liftId of [...frame.querySelectorAll('[data-lift]')].map((s) => s.dataset.lift)) {
       const section = this.app.renderBoard(liftId, true);
@@ -151,6 +155,19 @@ window.TvDisplay = class TvDisplay {
     // Hall of Fame: badge cards when they fit, otherwise paged tables.
     if (frame.querySelector('#hallOfFame') && this.app.renderHallOfFame(false).getBoundingClientRect().bottom > bottom) {
       this.app.renderHallOfFame(true);
+    }
+    // A ranked row taller than a whole page (a long name wrapping in a narrow column on a small
+    // TV) would run off the screen: the latest-PRs line gives way, as a podium does.
+    const tooTall = [...frame.querySelectorAll('.leaderboard-section tbody')].some((tbody) => {
+      if (tbody.querySelector('.empty-state')) return false;
+      const rows = [...tbody.querySelectorAll('tr')];
+      rows.forEach((tr) => { tr.hidden = false; });
+      const room = bottom - tbody.getBoundingClientRect().top;
+      return rows.some((tr) => tr.getBoundingClientRect().height > room);
+    });
+    if (tooTall && !document.getElementById('tvLatest').hidden) {
+      root.classList.add('tv-latest-withdrawn');
+      bottom = frame.getBoundingClientRect().bottom - TvDisplay.PAGE_PAD;
     }
     this.boards = [];
     let pages = 1;

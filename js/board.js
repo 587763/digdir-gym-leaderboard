@@ -131,6 +131,20 @@ window.BoardView = (() => {
     </div>`;
   }
 
+  // TV only: the latest verified PRs in one quiet line under every tab, as many as fit (the
+  // rest wrap out of sight).
+  const STRIP_LIMIT = 6;
+  function latestStrip(ctx) {
+    return html`<span class="tv-latest-label">${icon('🔥')} Latest PRs</span>
+      <ol class="tv-latest-list">${(ctx.latest || []).slice(0, STRIP_LIMIT).map((item) => {
+        const lift = Lifts.get(item.lift);
+        return html`<li class="tv-latest-item">${avatar(item.athlete, 26)}<span class="tv-latest-name">${item.athlete.name}</span>
+          <span class="tv-latest-lift">${icon(lift.emoji)} ${Lifts.formatUnit(item.lift, item.value)}</span>${
+          item.previous > 0 && html`<span class="delta up">${Lifts.formatDelta(item.lift, item.value - item.previous)}</span>`}
+          <span class="tv-latest-when">${UI.timeAgo(item.at)}</span></li>`;
+      })}</ol>`;
+  }
+
   // All boards of a tab group ('main', 'total', 'other', 'cardio', 'latest'), each in its
   // bodyweight version while ⚖️ Bodyweight ranking is on (races have none).
   function group(name, ctx) {
@@ -157,5 +171,5 @@ window.BoardView = (() => {
     })}`;
   }
 
-  return { section, group, latest, podium, medal, badges, hallOfFame, MAX_PODIUM_ATHLETES };
+  return { section, group, latest, latestStrip, podium, medal, badges, hallOfFame, MAX_PODIUM_ATHLETES };
 })();

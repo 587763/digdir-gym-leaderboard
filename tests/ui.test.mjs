@@ -54,6 +54,16 @@ test('relative times read naturally', () => {
   assert.equal(UI.timeAgo('not a date', now), '');
 });
 
+test('the TV latest-PRs line lists the newest few, escaped, with their gain', () => {
+  const a = athlete('<b>A</b>', { bench: 110 });
+  const items = Array.from({ length: 8 }, (_, i) => ({ id: `p${i}`, athlete: a, lift: 'bench', value: 110 - i, previous: 100 - i, at: new Date().toISOString() }));
+  const line = String(BoardView.latestStrip(ctx([a], { latest: items })));
+  assert.equal((line.match(/class="tv-latest-item"/g) || []).length, 6, 'at most six; the line shows as many as fit');
+  assert.doesNotMatch(line, /<b>A<\/b>/);
+  assert.match(line, /110\.0 kg/);
+  assert.match(line, /\+10\.0 kg/);
+  assert.match(line, /just now/);
+});
 test('the latest feed reports a failed load instead of an empty board', () => {
   assert.match(String(BoardView.latest(ctx([], { error: true }))), /unavailable/);
   assert.match(String(BoardView.latest(ctx([], { loading: true }))), /Loading/);

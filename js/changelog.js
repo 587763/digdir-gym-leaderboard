@@ -6,6 +6,13 @@
 // tests/changelog.test.mjs keeps the top entry in step with the app version.
 window.CHANGELOG = [
   {
+    version: '3.7.0',
+    date: '2026-10-19',
+    changes: [
+      '📺 The TV shows the latest PRs along the bottom, whichever tab is up, so new records get noticed.',
+    ],
+  },
+  {
     version: '3.6.1',
     date: '2026-10-19',
     changes: [

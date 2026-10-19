@@ -41,7 +41,7 @@ achievements. Hand-drawn whiteboard look; the board updates live across everyone
   the **📺 TV mode** button. You get a full-screen landscape layout that auto-cycles
   through the tabs hands-free — and pauses while the browser tab is off-screen, so it
   plays nicely with a screen that rotates between several pages. A big roster is paged
-  through automatically. Add `&rotate=20` to change the target seconds per tab (default
+  through automatically, and the latest PRs run along the bottom on every tab. Add `&rotate=20` to change the target seconds per tab (default
   15), and `&tabs=lifts,total,latest` to show only some tabs. The TV never ranks by
   bodyweight unless you ask for it: add `&bodyweight`, or turn it on in that browser before
   starting TV mode. Large rosters extend that time so every page gets at least five seconds to read;
