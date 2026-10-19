@@ -37,6 +37,11 @@
     {id:'pr-2',athlete_id:'athlete-1',payload:{lift:'bench',value:110,previous_value:100},decided_at:'2026-06-03T10:00:00Z'},
     {id:'pr-3',athlete_id:'athlete-1',payload:{lift:'bench',value:120,previous_value:110},decided_at:'2026-08-01T10:00:00Z'},
     {id:'pr-4',athlete_id:'athlete-archived',payload:{lift:'squat',value:120,previous_value:110},decided_at:'2026-07-15T10:00:00Z'},
+    // Recent PRs by several athletes, for the Latest feed and the TV's latest-PRs line.
+    {id:'pr-5',athlete_id:'athlete-3',payload:{lift:'pullups',value:12,previous_value:10},decided_at:ago(6)},
+    {id:'pr-6',athlete_id:'athlete-4',payload:{lift:'run1k',value:244,previous_value:251},decided_at:ago(3)},
+    {id:'pr-7',athlete_id:'athlete-0',payload:{lift:'deadlift',value:180,previous_value:175},decided_at:ago(1)},
+    {id:'pr-8',athlete_id:'athlete-2',payload:{lift:'squat',value:158,previous_value:150},decided_at:ago(0.1)},
   ];
   // Planned sessions this week and next, relative to today, with people joining them.
   const at = (days, hour, minute = 0) => { const d = new Date(); d.setDate(d.getDate() + days); d.setHours(hour, minute, 0, 0); return d.toISOString(); };
@@ -99,7 +104,8 @@
     banner.className='config-banner fixture-banner'; banner.textContent=`Local test fixture: ${fixture}. Changes stay in this tab.`;
     // A constructed stylesheet, because the page's CSP forbids inline <style> elements.
     const sheet = new CSSStyleSheet();
-    sheet.replaceSync('.tv-mode .fixture-banner { position: fixed; bottom: 6px; left: 28px; z-index: 10; margin: 0; padding: 2px 6px; font: 12px/1.5 system-ui; }');
+    // On TV the bottom line belongs to the latest PRs, so the banner sits at the very top.
+    sheet.replaceSync('.tv-mode .fixture-banner { position: fixed; top: 2px; left: 28px; z-index: 10; margin: 0; padding: 0 6px; font: 11px/1.5 system-ui; }');
     document.adoptedStyleSheets = [...document.adoptedStyleSheets, sheet];
     document.querySelector('.container').prepend(banner);
   });

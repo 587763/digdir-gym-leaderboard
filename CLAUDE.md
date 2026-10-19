@@ -121,7 +121,8 @@ Live: https://587763.github.io/digdir-gym-leaderboard/ · Origin: `587763/digdir
   protocol (`CHROME=` overrides detection). Asserts no horizontal overflow, scores inside their
   boards, TV never scrolls and every ranked row renders on screen on some page, dialogs open
   cleanly, table text stays in its cells, the selected tab is visible, focus survives a
-  re-render, the Friday note and plan cards keep their content inside, and a quiet console.
+  re-render, the Friday note and plan cards keep their content inside, the TV latest-PRs line
+  shows whole items with unclipped names, and a quiet console.
   Every tab is checked ranked by bodyweight and by weight lifted; the planner as dialogs.
   Assert containment, not pixels (fonts differ by machine).
 - `tests/`: Node tests, LinkeDOM UI tests (with `<dialog>` and innerHTML shims in helpers),
@@ -235,6 +236,11 @@ still advances. A PR verified while the board is open gets a celebration banner.
   `--tv-scale` (`min(1rem, 1.15vw)`) so 720p keeps names whole. A fifth board in one tab
   needs a new TV layout (or paging through rows of boards).
 - Connection warnings and Retry remain visible in the TV footer reserve.
+- The latest verified PRs run along the bottom of the TV (`#tvLatest`, `BoardView.latestStrip`,
+  at most 6 from the Latest feed) on every tab, Latest included, for consistency. It is one line
+  of fixed height: items that don't fit wrap onto a clipped second line, so only whole items
+  show; it is hidden without PRs. The active tab's frame shrinks above it, so `fit()` pages as
+  before. The fixture banner sits at the top on TV to keep the line clear.
 - The Friday note becomes one sticky line in the TV header (`#tvNextLift`), taking no board
   height: the Friday lift, plus the next session on a TV signed in as a member (a signed-out
   TV cannot read plans). Below 1500px wide a Friday-first line stacks its two parts so it stays

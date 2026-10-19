@@ -803,6 +803,23 @@ html.tv-mode, .tv-mode body { height: 100vh; overflow: hidden; }
 .tv-mode .podium-spot.second .podium-stand { height: 2.8rem; }
 .tv-mode .podium-spot.third  .podium-stand { height: 2rem; }
 
+/* The latest verified PRs: one quiet line along the bottom of every tab. Items that don't fit
+   wrap onto a second line, which is clipped out of sight. */
+.tv-latest { display: none; }
+.tv-mode .tv-latest {
+  display: flex; align-items: center; gap: 18px; flex: 0 0 auto; height: 2.6rem; margin-top: 6px; padding: 0 4px; overflow: hidden;
+  border-top: 2px dashed var(--line); color: var(--ink-soft);
+}
+.tv-latest-label { flex: 0 0 auto; font: 700 .72rem/1 system-ui, sans-serif; text-transform: uppercase; letter-spacing: .14em; color: #b45309; }
+.tv-latest-list { list-style: none; display: flex; flex-wrap: wrap; align-items: center; gap: 0 28px; flex: 1 1 auto; min-width: 0; height: 2.6rem; overflow: hidden; }
+.tv-latest-item { display: flex; align-items: center; gap: 7px; height: 2.6rem; white-space: nowrap; font-size: 1.15rem; }
+.tv-latest-item svg { flex: 0 0 auto; }
+/* Long names end in an ellipsis; the padding keeps the handwriting's overhanging strokes (the
+   "d" in Hallvard) inside the clipped box. */
+.tv-latest-name { max-width: 14em; overflow: hidden; text-overflow: ellipsis; padding: .2em .25em .2em .1em; font-weight: 700; color: var(--ink); }
+.tv-latest-lift { font-weight: 700; color: var(--marker-blue); font-variant-numeric: tabular-nums; }
+.tv-latest-when { font-family: 'Indie Flower', cursive; font-size: .9em; }
+
 /* Page dots: shown when a tab's roster spans more than one screen. The rotation
    cycles a page per tick before advancing to the next tab; the active dot tracks
    which slice is on screen. TV_PAGE_PAD in app.js reserves the room below. */

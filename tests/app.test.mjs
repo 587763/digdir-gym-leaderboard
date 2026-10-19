@@ -470,6 +470,16 @@ test('bodyweight ranking re-ranks the boards in place for viewers who turn it on
   context.localStorage.getItem=(key)=>key==='lb.bodyweight'?'1':null;
   assert.equal(app.bodyweightPreference(),true,'the choice survives a reload');
 });
+test('the TV shows the latest verified PRs under every tab, and nothing without any', async () => {
+  const pr={id:'pr',athlete_id:'A',payload:{lift:'squat',value:120,previous_value:110},decided_at:new Date().toISOString()};
+  const {app,store,document}=await application({listAthletes:async()=>[athlete('A',{squat:120})],listRecentPrs:async()=>[pr]},{search:'?tv'});
+  const strip=document.getElementById('tvLatest');
+  assert.equal(strip.hidden,false);
+  assert.match(strip.textContent,/Latest PRs[\s\S]*A[\s\S]*120\.0 kg[\s\S]*\+10\.0 kg/);
+  store.listRecentPrs=async()=>[];
+  await app.refreshAll();
+  assert.equal(strip.hidden,true);
+});
 test('a TV ranks by bodyweight only when it was turned on', async () => {
   const listAthletes=async()=>[athlete('a',{bench:100,bodyweight:80})];
   const tv=await application({listAthletes},{search:'?tv'});
