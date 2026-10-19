@@ -29,8 +29,9 @@ achievements. Hand-drawn whiteboard look; the board updates live across everyone
 - **📅 Planner** (the button on that note): say when you're heading to the gym and what
   you'll do, and tap **🙋 I'm in** to join someone else at the time you'll come down. Each
   session shows who comes when, and its earliest time with a + when others come later
-  (13:00+). The note itself shows the next session and how many are in; a session before
-  Friday comes first there. The planner covers this week and the eight after it; each
+  (13:00+). The Friday lift is a session too: join it at your own time from its card in the
+  planner or from the note. The note shows who is in on Friday and, when there is one, the next
+  planned session and how many are in; a session before Friday comes first there. The planner covers this week and the eight after it; each
   Friday carries its lift, and a Friday plan starts as that lift. Only members on the board
   see the plans, since they tell when someone will be at the gym.
 - **✨ What's new** (above the tabs) lists what changed in each release, with a dot until
@@ -130,7 +131,7 @@ was verified, and the remaining follow-ups.
 For an existing database, apply the numbered files in
 [`supabase/migrations/`](supabase/migrations/) in order (the Supabase SQL Editor, or
 `supabase db query --linked -f <file>`) before deploying the frontend that needs them (the
-live database has everything through `0010_planner.sql`). They preserve existing data. For a
+live database has everything through `0010_planner.sql`; release 3.6.1 needs `0011_friday_joins.sql`). They preserve existing data. For a
 fresh installation, use `supabase/schema.sql` instead; that file resets the tables.
 
 ## Backups

@@ -162,6 +162,12 @@ button.next-session { cursor: pointer; }
 button.next-session:hover .next-session-what { color: var(--marker-blue); }
 .next-session-what { font-family: 'Permanent Marker', cursive; font-size: 1.15rem; line-height: 1.3; overflow-wrap: anywhere; }
 .next-session-who { font-family: 'Indie Flower', cursive; font-size: 1rem; color: #6b5a1e; }
+/* Members join the Friday lift from here too. */
+.next-friday-who {
+  display: block; margin-top: 2px; padding: 0; font-family: 'Indie Flower', cursive; font-size: 1rem; color: #6b5a1e;
+  background: none; border: 0; cursor: pointer; text-decoration: underline dotted rgba(124,93,0,.45); text-underline-offset: 3px;
+}
+.next-friday-who:hover { color: var(--marker-blue); }
 .tv-next-lift { display: none; }
 /* Role-gated controls: hidden by default, shown when the body has the matching class */
 .own-only, .claim-only, .review-only, .admin-only { display: none; }
@@ -350,6 +356,11 @@ body.is-admin   .admin-only  { display: inline-flex; }
   align-self: flex-start; justify-self: start; max-width: 100%; padding: 2px 10px 4px; font-family: 'Permanent Marker', cursive; font-size: 1rem; line-height: 1.3;
   background: #fdeb86; border-radius: 2px 2px 10px 2px; transform: rotate(-1deg); box-shadow: 1px 2px 4px rgba(120,90,0,.14);
 }
+/* In the planner, members join the Friday lift from its note. */
+.friday-card { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; padding: 4px 10px 8px; }
+.friday-card .plan-activity { font-family: inherit; font-size: 1rem; font-weight: 400; }
+.friday-card-who { font-family: 'Caveat', cursive; font-size: 1.05rem; font-weight: 600; color: var(--marker-green); overflow-wrap: anywhere; }
+.friday-card.joined { box-shadow: 0 0 0 2px var(--marker-green), 1px 2px 4px rgba(120,90,0,.14); }
 .friday-chip-label { display: block; font: 700 .6rem/1.6 system-ui, sans-serif; text-transform: uppercase; letter-spacing: .14em; color: #7c5d00; }
 .planner-plans { list-style: none; display: flex; flex-direction: column; gap: 8px; }
 .plan-card { position: relative; min-width: 0; padding: 8px 10px; background: #fff; border: 2px solid var(--line); border-radius: 10px; box-shadow: 1px 1px 0 rgba(0,0,0,.05); }
@@ -381,6 +392,8 @@ body.is-admin   .admin-only  { display: inline-flex; }
 .plan-join.joined { background: var(--marker-green); color: #fff; }
 /* One session: who comes when, and the time you'll come. */
 .plan-session { max-width: 560px; }
+.session-eyebrow { margin-top: 12px; }
+.session-eyebrow + .session-title { margin-top: 0; }
 .session-title { margin-top: 12px; font-family: 'Permanent Marker', cursive; font-size: 1.5rem; overflow-wrap: anywhere; }
 .session-title:focus { outline: none; }
 .session-when { font: 600 .85rem/1.6 system-ui, sans-serif; letter-spacing: .06em; text-transform: uppercase; color: var(--ink-soft); }

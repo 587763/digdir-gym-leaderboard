@@ -77,7 +77,10 @@ Live: https://587763.github.io/digdir-gym-leaderboard/ · Origin: `587763/digdir
   ahead); `isOpen` (joinable until 2 h after the start). People come at their own time:
   `arrivals` (host at the start, joiners at `arrives_at`, earliest first), `timeLabel`
   ("13:00+" when someone comes later), `readArrival` (within 6 h of the start, like SQL);
-  `nextPlan` and each day's order go by the earliest arrival.
+  `nextPlan` and each day's order go by the earliest arrival. Each Friday's lift is a session
+  too: `fridayPlan(date, fridayJoins)` makes it a plan with no host (id `friday-YYYY-MM-DD`,
+  open all that Friday, any arrival time that day) from `friday_joins`, so cards, the session
+  view and the join form work the same; `planById` resolves both kinds.
   Markup: `fridayNote` (the sticky note in `#nextLift`: the Friday lift for everyone, plus the
   next session and how many are in for members; a session on a day before Friday leads and
   the Friday lift shrinks to a labelled emoji), `tvNote` (`#tvNextLift`, the same in one TV
@@ -110,7 +113,8 @@ Live: https://587763.github.io/digdir-gym-leaderboard/ · Origin: `587763/digdir
   archived athletes (`archived_at`, `restore_my_athlete()`, archive-aware propose/decide);
   0008 opt-in bodyweight (`athletes.bodyweight` with a 30–300 check, `set_my_bodyweight()`);
   0009 strict curl (`strictcurl` takes one decimal in `lift_allows_decimals()`); 0010 planner
-  (`plans`, `plan_joins`, `can_plan()`, `save_plan()`, `delete_plan()`, `join_plan()`, realtime).
+  (`plans`, `plan_joins`, `can_plan()`, `save_plan()`, `delete_plan()`, `join_plan()`, realtime);
+  0011 Friday joins (`friday_joins`, `join_friday()`, realtime).
 - `scripts/dev-server.mjs`: Node static allowlist server, no caching, localhost only. Does not
   serve `.env`, `.git`, SQL or arbitrary workspace files. `PORT` overrides 3000.
 - `scripts/browser-check.mjs`: zero-dependency layout checks in local Chrome over the DevTools
@@ -196,7 +200,11 @@ Fixture controls/data are never included in the deployed artifact.
   creates or changes your own plan (deduplicates retries, at most 20 upcoming each),
   `delete_plan()` lets the owner or an admin remove one, `join_plan(id, join, arrives_at)` joins
   someone else's at a time within 6 h of its start (null: at the start; joining again changes
-  it) or leaves; joining closes 2 h after the start. Moving a session moves every arrival with it. Deleting a member's account removes their plans
+  it) or leaves; joining closes 2 h after the start. Moving a session moves every arrival with it.
+  `friday_joins` (day, member, arrives_at; the day must be a Friday) holds joins to the
+  computed Friday lift, readable like plans; `join_friday(day, join, arrives_at)` joins from
+  today to 60 days ahead at a time on that Friday (a day's slack each side: the database runs
+  in UTC, the app checks the local day), changes the time, or leaves. Deleting a member's account removes their plans
   and joins. Old plans are not purged; reads only fetch the weeks shown.
 
 ## TV / display mode
@@ -252,6 +260,7 @@ still advances. A PR verified while the board is open gets a celebration banner.
 ## Database upgrades and deployment
 Apply migrations in order before deploying the frontend that needs them; production has
 0002–0010 (0001 was superseded; 0008 and 0009 applied 12 October 2026, 0010 on 19 October 2026).
+0011 (Friday joins, needed by 3.6.1) is not applied yet; the planner fails to load without it.
 A PR whose frontend needs a new migration also applies it to production as part of the work
 (the maintainer's standing rule), after checking the backup ran, and records it here.
 The frontend selects `athletes.archived_at` (since 3.2, 0007) and `athletes.bodyweight` (since

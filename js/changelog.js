@@ -6,6 +6,14 @@
 // tests/changelog.test.mjs keeps the top entry in step with the app version.
 window.CHANGELOG = [
   {
+    version: '3.6.1',
+    date: '2026-10-19',
+    changes: [
+      '🙋 Join the Friday lift at your own time too, from the note or its card in the planner.',
+      'The note shows who is in on Friday, and shows a planned session only when there is one.',
+    ],
+  },
+  {
     version: '3.6.0',
     date: '2026-10-19',
     changes: [

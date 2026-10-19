@@ -9,12 +9,14 @@
 -- boards but keep their history; an admin, an approved claim or their linked member
 -- restores them, and only deleting one erases it. Deleting a member's account keeps the
 -- requests they made. Members may share their bodyweight for the per-bodyweight boards and
--- clear it again, without review. Members plan gym sessions and join each other's; only
--- members on the board and admins can see the plans. Enforced by RLS + functions.
+-- clear it again, without review. Members plan gym sessions and join each other's, and the
+-- Friday lift's sessions, at their own time; only members on the board and admins can see the
+-- plans. Enforced by RLS + functions.
 
 -- ───────────────────────────────────────────────────────────────────────────
 -- Athletes (the board)
 -- ───────────────────────────────────────────────────────────────────────────
+drop table if exists public.friday_joins cascade;
 drop table if exists public.plan_joins cascade;
 drop table if exists public.plans cascade;
 drop table if exists public.proposals cascade;
@@ -150,6 +152,16 @@ create table public.plan_joins (
 );
 create index if not exists plan_joins_user on public.plan_joins(user_id);
 
+-- Joins to a Friday's rotation session; the rotation is computed by the app, so by date.
+create table public.friday_joins (
+  day        date not null check (extract(isodow from day) = 5),  -- a Friday
+  user_id    uuid not null references public.profiles(user_id) on delete cascade,
+  arrives_at timestamptz not null,
+  created_at timestamptz not null default now(),
+  primary key (day, user_id)
+);
+create index if not exists friday_joins_user on public.friday_joins(user_id);
+
 -- ───────────────────────────────────────────────────────────────────────────
 -- Row Level Security
 -- ───────────────────────────────────────────────────────────────────────────
@@ -158,6 +170,7 @@ alter table public.profiles  enable row level security;
 alter table public.proposals enable row level security;
 alter table public.plans enable row level security;
 alter table public.plan_joins enable row level security;
+alter table public.friday_joins enable row level security;
 
 create policy "Public read access" on public.athletes for select using (true);
 create policy "admins insert athletes" on public.athletes for insert to authenticated with check (public.is_admin());
@@ -176,6 +189,7 @@ create policy "approved PRs are public history" on public.proposals for select u
 -- them. Nobody writes them directly: save_plan(), delete_plan() and join_plan() do.
 create policy "members read plans" on public.plans for select to authenticated using (public.can_plan());
 create policy "members read plan joins" on public.plan_joins for select to authenticated using (public.can_plan());
+create policy "members read friday joins" on public.friday_joins for select to authenticated using (public.can_plan());
 
 -- ───────────────────────────────────────────────────────────────────────────
 -- Governed write paths
@@ -544,6 +558,36 @@ begin
     on conflict (plan_id, user_id) do update set arrives_at = excluded.arrives_at;
 end; $$;
 
+-- Join (p_join true) a Friday's lift, coming at p_arrives_at on that Friday, or change that
+-- time; or leave it. Fridays take joins from today up to 60 days ahead. The app checks the
+-- local day; this allows a day's slack either side, since the database runs in UTC.
+create or replace function public.join_friday(p_day date, p_join boolean, p_arrives_at timestamptz)
+returns void language plpgsql security definer set search_path = public as $$
+declare uid uuid := auth.uid(); prof public.profiles;
+begin
+  if uid is null then raise exception 'not authenticated'; end if;
+  select * into prof from public.profiles where user_id = uid;
+  if not found then raise exception 'no profile'; end if;
+  if prof.status = 'blocked' then raise exception 'your account is blocked'; end if;
+  if not coalesce(prof.is_admin or (prof.status = 'active' and prof.athlete_id is not null), false) then
+    raise exception 'claim your spot on the board before joining sessions';
+  end if;
+  if p_join is null then raise exception 'join must be true or false'; end if;
+  if p_day is null or extract(isodow from p_day) <> 5 then raise exception 'pick a Friday'; end if;
+  if not p_join then
+    delete from public.friday_joins where day = p_day and user_id = uid;
+    return;
+  end if;
+  if p_day < current_date - 1 then raise exception 'that Friday has passed'; end if;
+  if p_day > current_date + 60 then raise exception 'Fridays can be joined at most 60 days ahead'; end if;
+  if p_arrives_at is null or p_arrives_at not between p_day::timestamptz - interval '1 day'
+                                                  and p_day::timestamptz + interval '2 days' then
+    raise exception 'pick a time on that Friday';
+  end if;
+  insert into public.friday_joins(day, user_id, arrives_at) values (p_day, uid, p_arrives_at)
+    on conflict (day, user_id) do update set arrives_at = excluded.arrives_at;
+end; $$;
+
 create index if not exists proposals_pending_created on public.proposals(created_at) where status = 'pending';
 create index if not exists proposals_history_athlete on public.proposals(athlete_id, decided_at) where status = 'approved' and kind = 'pr';
 -- Public feed of recently verified PRs (approved PRs are already public through RLS).
@@ -557,6 +601,7 @@ alter publication supabase_realtime add table public.proposals;
 alter publication supabase_realtime add table public.profiles;
 alter publication supabase_realtime add table public.plans;
 alter publication supabase_realtime add table public.plan_joins;
+alter publication supabase_realtime add table public.friday_joins;
 
 insert into public.athletes (name, bench, squat, deadlift, achievements, lifts) values
   ('Alexander', 132.5, 120.0, 137.5, '{gripper90kg}', '{"deadhang": 95}'),

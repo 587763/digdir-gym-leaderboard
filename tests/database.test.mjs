@@ -7,7 +7,8 @@ let db;
 const ids = Object.fromEntries(['admin','member','peer','pending','blocked','missing','deputy','newcomer','reviewer'].map((key,i)=>[key,`00000000-0000-4000-8000-${String(i+1).padStart(12,'0')}`]));
 const governance='supabase/migrations/0005_governance_hardening.sql', safeguards='supabase/migrations/0006_member_safeguards.sql',
   archiving='supabase/migrations/0007_archive_athletes.sql', bodyweights='supabase/migrations/0008_bodyweight.sql',
-  curls='supabase/migrations/0009_strict_curl.sql', planner='supabase/migrations/0010_planner.sql';
+  curls='supabase/migrations/0009_strict_curl.sql', planner='supabase/migrations/0010_planner.sql',
+  fridays='supabase/migrations/0011_friday_joins.sql';
 let athletes, freshCatalog;
 async function as(user) {
   await db.exec('reset role');
@@ -28,6 +29,10 @@ async function savePlan(start, activity='Squat', note=null, id=null) {
 // Joins at an SQL time expression (null: at the plan's start), or leaves with join false.
 async function joinPlan(id, join=true, arrives='null') { return db.query(`select public.join_plan($1,$2,${arrives})`,[id,join]); }
 async function deletePlan(id) { return db.query('select public.delete_plan($1)',[id]); }
+// Joins a Friday (an SQL date expression) at an SQL time expression, or leaves with join false.
+async function joinFriday(day, join=true, arrives="now()") { return db.query(`select public.join_friday(${day},$1,${arrives})`,[join]); }
+// The coming Friday (today on a Friday), as SQL.
+const nextFriday="(current_date + ((5 - extract(isodow from current_date)::int + 7) % 7))";
 const visiblePlans=async()=>(await db.query('select id from plans')).rows.length;
 // Rows as stored, read past RLS.
 async function stored(sql,params=[]) { await db.exec('reset role'); return (await db.query(sql,params)).rows; }
@@ -65,7 +70,7 @@ async function catalog(pg) {
 const fresh=()=>freshCatalog??=database().then(async(pg)=>{try{return await catalog(pg);}finally{await pg.close();}});
 before(async()=>{
   db = await database();
-  for(const file of [governance,governance,safeguards,safeguards,archiving,archiving,bodyweights,bodyweights,curls,curls,planner,planner]) await db.exec(read(file));
+  for(const file of [governance,governance,safeguards,safeguards,archiving,archiving,bodyweights,bodyweights,curls,curls,planner,planner,fridays,fridays]) await db.exec(read(file));
   await db.exec('grant usage on schema public,auth to authenticated,anon; grant select,insert,update,delete on all tables in schema public to authenticated; grant select on all tables in schema public to anon;');
   for(const [name,id] of Object.entries(ids)) {
     if(name==='missing') continue;
@@ -152,6 +157,38 @@ test('people join at their own time, within six hours of the start, and move wit
   assert.equal(await arrival(),-45);
   assert.equal((await stored('select count(*)::int as n from plan_joins where plan_id=$1',[id]))[0].n,1);
   await deletePlan(id);
+});
+test('members join the Friday lift at their own time; others cannot see or forge it',async()=>{
+  const at=(time)=>`(${nextFriday}::timestamptz + interval '${time}')`;
+  const joins=async()=>(await stored('select user_id,(extract(epoch from arrives_at - $1::date::timestamptz)/60)::int as minutes from friday_joins order by user_id',[(await stored(`select ${nextFriday} as d`))[0].d]));
+  await as('member');
+  await joinFriday(nextFriday,true,at('13 hours'));
+  await joinFriday(nextFriday,true,at('14 hours'));
+  await as('peer'); await joinFriday(nextFriday,true,at('13 hours 30 minutes'));
+  assert.deepEqual(await joins(),[{user_id:ids.member,minutes:840},{user_id:ids.peer,minutes:810}],'joining again changes the time');
+  assert.equal((await db.query('select count(*)::int as n from friday_joins')).rows[0].n,2);
+  // Visitors, members awaiting a spot and blocked accounts see nothing and can't join.
+  await db.exec('reset role; set role anon');
+  assert.equal((await db.query('select count(*)::int as n from friday_joins')).rows[0].n,0);
+  for(const user of ['pending','blocked']) {
+    await as(user);
+    assert.equal((await db.query('select count(*)::int as n from friday_joins')).rows[0].n,0,user);
+    await assert.rejects(()=>joinFriday(nextFriday,true,at('13 hours')),user==='blocked'?/blocked/:/claim your spot/);
+  }
+  await as('member');
+  await assert.rejects(()=>db.query(`insert into friday_joins(day,user_id,arrives_at) values(${nextFriday},$1,now())`,[ids.member]),/row-level security/);
+  assert.equal((await db.query('delete from friday_joins returning day')).rows.length,0);
+  // Only Fridays, from today up to 60 days ahead, at a time on that Friday.
+  await assert.rejects(()=>joinFriday(`${nextFriday} + 1`,true),/pick a Friday/);
+  await assert.rejects(()=>joinFriday(`${nextFriday} - 7 * 2`,true),/has passed/);
+  await assert.rejects(()=>joinFriday(`${nextFriday} + 7 * 9`,true),/60 days/);
+  await assert.rejects(()=>joinFriday(nextFriday,true,at('3 days')),/on that Friday/);
+  await assert.rejects(()=>joinFriday(nextFriday,true,'null'),/on that Friday/);
+  await assert.rejects(()=>joinFriday(nextFriday,null),/true or false/);
+  // Leaving removes only your own join.
+  await joinFriday(nextFriday,false,'null');
+  assert.deepEqual((await joins()).map((j)=>j.user_id),[ids.peer]);
+  await db.exec('reset role'); await db.query('delete from friday_joins');
 });
 test('plans are checked like the planner form, and a session closes two hours after it starts',async()=>{
   await as('member');
@@ -576,7 +613,7 @@ test('fresh schema and migration use identical governance functions',()=>{
   for(const [file,names] of [[governance,['handle_new_user','is_admin']],
     [safeguards,['validate_athlete_values','protect_last_admin']],
     [archiving,['propose','decide','withdraw','restore_my_athlete']],[bodyweights,['set_my_bodyweight']],[curls,['lift_allows_decimals']],
-    [planner,['can_plan','save_plan','delete_plan','join_plan']]]) {
+    [planner,['can_plan','save_plan','delete_plan','join_plan']],[fridays,['join_friday']]]) {
     for(const name of names) assert.equal(extract(read('supabase/schema.sql'),name),extract(read(file),name),`${file}: ${name}`);
   }
 });
@@ -672,15 +709,16 @@ test('upgrading 0008 to 0009 gives strict curls one decimal and matches the fres
   await withdraw(await propose('pr',athletes[0].id,{lift:'strictcurl',value:42.5}));
 });
 test('upgrading 0009 to 0010 adds the planner, preserves rows and matches the fresh schema',async()=>{
-  // Continues from the 0009 database the previous test upgraded, without the planner.
+  // Continues from the 0009 database the previous test upgraded, without the planner (or 0011).
   await db.exec(`reset role;
-    drop table plan_joins, plans;
+    drop table friday_joins, plan_joins, plans;
+    drop function join_friday(date,boolean,timestamptz);
     drop function can_plan(), save_plan(uuid,timestamptz,text,text), delete_plan(uuid), join_plan(uuid,boolean,timestamptz);`);
   const before=await allRows();
   await db.exec(read(planner));
   await db.exec(read(planner));
   assert.deepEqual(await allRows(),before);
-  assert.deepEqual(await catalog(db),await fresh());
+  // The next test applies 0011 and compares the whole schema with a fresh install.
   assert.deepEqual((await db.query("select tablename from pg_publication_tables where pubname='supabase_realtime' and tablename like 'plan%' order by 1")).rows.map((r)=>r.tablename),['plan_joins','plans']);
   // Supabase grants new tables to its API roles by default; RLS decides what they may do.
   await db.exec('grant select,insert,update,delete on plans,plan_joins to authenticated; grant select on plans,plan_joins to anon;');
@@ -688,4 +726,18 @@ test('upgrading 0009 to 0010 adds the planner, preserves rows and matches the fr
   const id=await savePlan("now() + interval '1 day'",'Squat');
   await as('peer'); await joinPlan(id);
   assert.equal(await visiblePlans(),1);
+});
+test('upgrading 0010 to 0011 adds Friday joins, preserves rows and matches the fresh schema',async()=>{
+  // Continues from the 0010 database the previous test upgraded, without Friday joins.
+  await db.exec('reset role');
+  const before=await allRows();
+  await db.exec(read(fridays));
+  await db.exec(read(fridays));
+  assert.deepEqual(await allRows(),before);
+  assert.deepEqual(await catalog(db),await fresh());
+  assert.ok((await db.query("select 1 from pg_publication_tables where pubname='supabase_realtime' and tablename='friday_joins'")).rows.length);
+  await db.exec('grant select,insert,update,delete on friday_joins to authenticated; grant select on friday_joins to anon;');
+  await as('member'); await joinFriday(nextFriday,true,`(${nextFriday}::timestamptz + interval '15 hours')`);
+  await as('peer');
+  assert.equal((await db.query('select count(*)::int as n from friday_joins')).rows[0].n,1);
 });

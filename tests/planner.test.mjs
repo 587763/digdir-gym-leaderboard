@@ -105,6 +105,39 @@ test('a session lists who comes when, earliest first, with the host marked', () 
   assert.match(render(Planner.session(null, ctx())).textContent, /no longer planned/);
 });
 
+test('each Friday\'s lift is a session with no host that members join at their own time', () => {
+  const fri = (user_id, h, m = 0) => ({ day: '2026-10-23', user_id, arrives_at: day('2026-10-23', h, m).toISOString(), created_at: `${h}` });
+  const joins = [fri('peer', 15, 30), fri('me', 15), { day: '2026-10-30', user_id: 'host', arrives_at: day('2026-10-30', 9).toISOString() }];
+  const session = Planner.fridayPlan(day('2026-10-23'), joins);
+  assert.deepEqual(JSON.parse(JSON.stringify({ ...session, plan_joins: session.plan_joins.length })),
+    { id: 'friday-2026-10-23', friday: '2026-10-23', owner: null, starts_at: day('2026-10-23', 0).toISOString(), activity: 'Bench Press', emoji: '🏋️', note: null, plan_joins: 2 });
+  assert.equal(Planner.fridayPlan(day('2026-10-22'), joins), null);
+  assert.equal(Planner.planById('friday-2026-10-23', [], joins).friday, '2026-10-23');
+  assert.equal(Planner.planById('friday-2026-10-22', [], joins), null);
+  assert.equal(Planner.planById('p1', [plan()], joins).id, 'p1');
+  // No host: the earliest joiner sets the time, and before anyone joins there is none.
+  assert.equal(Planner.timeLabel(session), '15:00+');
+  assert.equal(Planner.timeLabel(Planner.fridayPlan(day('2026-11-06'), joins)), '');
+  // Open all that Friday; any time that day.
+  assert.equal(Planner.isOpen(session, day('2026-10-23', 23, 59).getTime()), true);
+  assert.equal(Planner.isOpen(session, day('2026-10-24', 0).getTime()), false);
+  assert.equal(Planner.readArrival(session, '07:00'), day('2026-10-23', 7).toISOString());
+  // The planner's Friday card lists who's in and lets members join or change their time.
+  const week = render(Planner.week(ctx({ fridayJoins: joins })));
+  const card = week.querySelector('[data-day="2026-10-23"] .friday-card');
+  assert.match(card.querySelector('.friday-chip-label').textContent, /Friday lift · 15:00\+/);
+  assert.match(card.querySelector('.friday-card-who').textContent, /you and Jens/);
+  assert.equal(card.querySelector('.plan-join').textContent, '✓ In · 15:00');
+  assert.ok(card.classList.contains('joined'));
+  assert.equal(render(Planner.week(ctx({ fridayJoins: [] }))).querySelector('.friday-card .plan-join').textContent, '🙋 I\'m in');
+  assert.equal(render(Planner.week(ctx({ fridayJoins: joins, canSee: false, canPlan: false }))).querySelector('.friday-card'), null);
+  // Its session view has no host, and says so when no one has joined yet.
+  const view = render(Planner.session(session, ctx()));
+  assert.match(view.querySelector('.session-eyebrow').textContent, /Friday lift/);
+  assert.deepEqual([...view.querySelectorAll('.session-people li')].map((li) => li.textContent.replace(/\s+/g, ' ').trim()), ['15:00 You', '15:30 Jens']);
+  assert.match(render(Planner.session(Planner.fridayPlan(day('2026-11-06'), []), ctx())).textContent, /No one has said they're coming yet/);
+});
+
 test('activities get the emoji of the exercise they name', () => {
   assert.deepEqual(['Squat', 'heavy bench day', 'Deadlift', 'Dead hang', 'Other lifts', 'Run 5 km', 'Yoga'].map(Planner.activityEmoji),
     ['🦵', '🏋️', '💀', '🐒', '🤸', '🏃', '💪']);
@@ -137,7 +170,15 @@ test('the Friday note names the lift, and members also see the next session and 
   assert.ok(friday.firstElementChild.matches('.next-lift-main:not(.compact)'));
   assert.ok(!friday.querySelector('.next-session').classList.contains('lead'));
   assert.match(note({ plan: plan({ owner: 'me', starts_at: day('2026-10-19', 8).toISOString() }) }).querySelector('.next-session').textContent, /now[\s\S]*Your session · no one in yet/);
-  assert.match(note({ plan: null }).querySelector('.next-session').textContent, /Nothing planned yet/);
+  // Without a planned session the note shows only the Friday lift, with a way to join it.
+  const quiet = note({ plan: null });
+  assert.equal(quiet.querySelector('.next-session'), null);
+  assert.equal(quiet.querySelector('.next-friday-who').textContent, '🙋 Join');
+  assert.equal(quiet.querySelector('.next-friday-who').dataset.id, 'friday-2026-10-23');
+  const fri = (user_id, h, m = 0) => ({ day: '2026-10-23', user_id, arrives_at: day('2026-10-23', h, m).toISOString() });
+  assert.equal(note({ fridayJoins: [fri('peer', 15, 30), fri('host', 15)] }).querySelector('.next-friday-who').textContent, 'from 15:00 · 🙋 2 in');
+  assert.equal(note({ fridayJoins: [fri('peer', 15), fri('me', 16)] }).querySelector('.next-friday-who').textContent, '✓ In at 16:00 · 🙋 2 in');
+  assert.equal(render(Planner.fridayNote({ now, fridayJoins: [fri('peer', 15)] })).querySelector('.next-friday-who'), null, 'visitors see no joins');
   assert.equal(note({ plan: plan(), error: true }).querySelector('.next-session'), null, 'no session claims when the plans did not load');
   assert.match(render(Planner.fridayNote({ now: day('2026-10-23') })).textContent, /today/);
   assert.match(note({ plan: plan({ starts_at: day('2026-10-22', 15).toISOString() }) }).querySelector('.next-session').textContent, /Next session · Thu 15:00/,
@@ -155,6 +196,8 @@ test('the TV header says the same as the note, and a signed-out TV only the Frid
   assert.ok(earlier.querySelector('.tv-note.session-first'));
   assert.match(earlier.querySelector('.tv-session').textContent, /Next · tomorrow 11:30[\s\S]*Squat[\s\S]*🙋 1 in/);
   assert.equal(earlier.querySelector('.tv-friday.compact').textContent.replace(/\s+/g, ''), 'Friday🏋️');
+  assert.match(tv({ canSee: true, fridayJoins: [{ day: '2026-10-23', user_id: 'peer', arrives_at: day('2026-10-23', 15).toISOString() }] })
+    .querySelector('.tv-friday').textContent, /Bench Press[\s\S]*from 15:00 · 🙋 1 in/);
   const friday = tv({ canSee: true, plan: plan() });
   assert.ok(friday.querySelector('.tv-note.friday-first .tv-friday:first-child:not(.compact)'));
   assert.match(friday.querySelector('.tv-session').textContent, /Next · Fri 15:00/);

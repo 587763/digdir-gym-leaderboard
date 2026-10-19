@@ -50,6 +50,12 @@
     {id:'plan-4',owner:'admin',starts_at:at(friday + 3, 7, 30),activity:'5 km run along the river',note:null,plan_joins:[]},
     {id:'plan-5',owner:'rita',starts_at:at(-1, 12),activity:'Deadlift',note:null,plan_joins:join(['peer',at(-1, 12)],['admin',at(-1, 12, 15)])},
   ];
+  // People joining the coming Friday's lift, each at their own time.
+  const fridayDay = ((d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`)(new Date(at(friday, 12)));
+  let fridayJoins = fixture === 'empty' ? [] : [
+    {day:fridayDay,user_id:'peer',arrives_at:at(friday, 15),created_at:ago(1)},
+    {day:fridayDay,user_id:'rita',arrives_at:at(friday, 15, 30),created_at:ago(0.5)},
+  ];
   if (fixture === 'admin') plans.push({id:'plan-long',owner:'peer',starts_at:at(2, 17, 45),activity:'Longactivitynamewithoutanyspaces'.repeat(2).slice(0, 60),
     note:'A long note that keeps going, because someone had a lot to say about their plans for the afternoon session and the kettlebells.'.slice(0, 200),
     plan_joins:join(['admin',at(2, 18)],['rita',at(2, 17, 45)],['newbie',at(2, 19, 15)])});
@@ -70,6 +76,9 @@
       plan.plan_joins.forEach((j)=>{j.arrives_at=new Date(Date.parse(j.arrives_at)+moved).toISOString();});
       Object.assign(plan,{starts_at,activity,note});},
     deletePlan:async(id)=>{plans=plans.filter((p)=>p.id!==id);},
+    listFridayJoins:async(from,to)=>copy(fridayJoins.filter((j)=>j.day>=from&&j.day<to)),
+    joinFriday:async(day,joining,arrives_at)=>{fridayJoins=fridayJoins.filter((j)=>!(j.day===day&&j.user_id===me.user_id));
+      if(joining) fridayJoins.push({day,user_id:me.user_id,arrives_at,created_at:new Date().toISOString()});},
     joinPlan:async(id,joining,arrives_at)=>{const plan=plans.find((p)=>p.id===id); plan.plan_joins=plan.plan_joins.filter((j)=>j.user_id!==me.user_id);
       if(joining) plan.plan_joins.push({user_id:me.user_id,arrives_at:arrives_at??plan.starts_at,created_at:new Date().toISOString()});},
     subscribe:(_cb,status)=>status('SUBSCRIBED'), onAuthChange(){},
