@@ -6,6 +6,17 @@
 // tests/changelog.test.mjs keeps the top entry in step with the app version.
 window.CHANGELOG = [
   {
+    version: '3.6.0',
+    date: '2026-10-19',
+    changes: [
+      '📅 Friday lift: a note by the buttons says which lift is up this Friday. It goes squat, bench, deadlift, then other lifts.',
+      'That lift\'s board gets a little sticker. The TV shows the note at the top (the next session only when signed in).',
+      '📅 A planner, opened from the note: say when you are heading to the gym and what you will do.',
+      '🙋 Join someone at your own time. A session shows who comes when, and its earliest time with a + (13:00+).',
+      'The note shows the next planned session and how many are in. Only members on the board see the plans.',
+    ],
+  },
+  {
     version: '3.5.0',
     date: '2026-10-12',
     changes: [

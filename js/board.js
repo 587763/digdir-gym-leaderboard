@@ -9,6 +9,7 @@
 //   me: athleteId | null      the signed-in member's athlete, highlighted
 //   podiumFits: boolean       TV fitting may withdraw a podium
 //   hallTable: boolean        TV fitting may switch the Hall of Fame to paged tables
+//   friday: { id, label, title }  this Friday's lift (Planner.fridayBoard), stickered on its board
 //   latest: [{ id, athlete, lift, value, previous, at }]  newest first }
 window.BoardView = (() => {
   const { html, raw } = UI;
@@ -106,7 +107,7 @@ window.BoardView = (() => {
       ? emptyRow(ctx, 3, lift.base ? html`No one on this board yet.<br><span>Share your bodyweight in My PRs to join.</span>` : undefined)
       : tableRows.map((r) => row(r, lift, ctx));
     return html`<div class="leaderboard-section${liftId === 'total' ? ' leaderboard-total' : ''}" data-lift="${liftId}">
-          <h2>${title(lift)}</h2>${withPodium && podium(winners, lift, ctx)}
+          <h2>${title(lift)}${ctx.friday?.id === (lift.base ?? lift.id) && html` <span class="friday-tag" title="${ctx.friday.title}">📅 ${ctx.friday.label}</span>`}</h2>${withPodium && podium(winners, lift, ctx)}
           <table class="leaderboard-table" id="${liftId}Table"${ranked.length > 0 && tableRows.length === 0 && raw(' hidden')}><thead><tr><th scope="col">Rank</th><th scope="col">Name</th><th scope="col">${scoreHeading(lift)}</th></tr></thead><tbody>${body}</tbody></table>
         </div>`;
   }

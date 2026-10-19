@@ -22,6 +22,17 @@ achievements. Hand-drawn whiteboard look; the board updates live across everyone
   reflects fitness per kilogram. It's off until you turn it on, and your browser remembers
   the choice. Neither rule is a scientific formula: dividing a little favours lighter
   athletes, multiplying a little favours heavier ones.
+- **📅 Friday lift**: a sticky note next to the buttons says which lift is up this Friday,
+  and that lift's board gets a little sticker. Fridays rotate squat, bench, deadlift, then
+  other lifts, by the calendar (a skipped Friday still uses its turn). The TV shows the note
+  as one line in its header; a TV signed in as a member also shows the next session.
+- **📅 Planner** (the button on that note): say when you're heading to the gym and what
+  you'll do, and tap **🙋 I'm in** to join someone else at the time you'll come down. Each
+  session shows who comes when, and its earliest time with a + when others come later
+  (13:00+). The note itself shows the next session and how many are in; a session before
+  Friday comes first there. The planner covers this week and the eight after it; each
+  Friday carries its lift, and a Friday plan starts as that lift. Only members on the board
+  see the plans, since they tell when someone will be at the gym.
 - **✨ What's new** (above the tabs) lists what changed in each release, with a dot until
   you've seen the latest one.
 - Tab links can be shared: add `#total`, `#cardio`, `#latest` and so on to the URL.
@@ -58,6 +69,9 @@ witnesses it):
   themselves.
 - **Changed your mind?** Withdraw your own pending request from My PRs, the claim dialog,
   or the review list.
+- **Plans** are yours: change or remove your own, and join anyone's (or change your time, or
+  leave) until two hours after it starts. Moving a session moves everyone's time with it.
+  Admins can remove any plan. No review is needed.
 - **Leaving the office?** Admins archive athletes instead of deleting them: they leave the
   boards but keep every record and verified PR. Sign in again with the same GitHub account
   and you'll be offered to bring your athlete back; athletes without a linked account can
@@ -116,7 +130,7 @@ was verified, and the remaining follow-ups.
 For an existing database, apply the numbered files in
 [`supabase/migrations/`](supabase/migrations/) in order in the Supabase SQL Editor before
 deploying the frontend that needs them (the live database has everything through
-`0009_strict_curl.sql`). They preserve existing data. For a fresh installation, use
+`0009_strict_curl.sql`; release 3.6 needs `0010_planner.sql`). They preserve existing data. For a fresh installation, use
 `supabase/schema.sql` instead; that file resets the tables.
 
 ## Backups

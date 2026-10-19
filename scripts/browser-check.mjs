@@ -20,7 +20,8 @@ if (!CHROME) { console.error('Chrome not found; set CHROME=/path/to/chrome'); pr
 
 const TABS = ['lifts', 'total', 'other', 'cardio', 'latest', 'fun'];
 const DIALOGS = ['app.openMine()', 'app.openReview()', 'app.openMembers()', 'app.openAthletes()',
-  "app.openAthleteEditor('athlete-1')", "app.openHistory('athlete-1')", "UI.dialogs.open('claimModal')", 'app.openChangelog()'];
+  "app.openAthleteEditor('athlete-1')", "app.openHistory('athlete-1')", "UI.dialogs.open('claimModal')", 'app.openChangelog()',
+  'app.openPlanner()', "app.openPlanner('plan-1')", "app.openSession('plan-long')", 'app.openPlanEditor()', "app.openPlanEditor('plan-2')"];
 const SCREENS = [
   { name: 'desktop', width: 1440, height: 1000, fixtures: ['admin', 'returning', 'layout', 'empty', 'error'] },
   { name: 'tablet', width: 820, height: 1180, fixtures: ['admin'] },
@@ -42,6 +43,10 @@ const CHECK_PAGE = `(() => {
     if (!el.getClientRects().length) continue;
     const section = el.closest('.leaderboard-section, .achievement-section');
     if (section && !inside(box(el), box(section))) problems.push('overflows its board: ' + label(el));
+  }
+  // The Friday note's content stays inside the note.
+  for (const el of document.querySelectorAll('#nextLift > *')) {
+    if (el.getClientRects().length && !inside(box(el), box(el.parentElement))) problems.push('overflows the Friday note: ' + el.textContent.trim().slice(0, 24));
   }
   // Fixed table layouts clip nothing: text wider than its cell spills over its neighbours.
   for (const cell of document.querySelectorAll('.tab-content.active :is(th, td)')) {
@@ -92,7 +97,16 @@ const CHECK_DIALOG = `(() => {
   const dialog = document.querySelector('dialog[open]');
   if (!dialog) return ['dialog did not open'];
   const card = dialog.querySelector('.modal-content');
-  return card.scrollWidth > card.clientWidth + 1 ? ['dialog content scrolls horizontally: ' + dialog.id] : [];
+  const problems = card.scrollWidth > card.clientWidth + 1 ? ['dialog content scrolls horizontally: ' + dialog.id] : [];
+  // Planned sessions stay inside their day.
+  const box = (el) => el.getBoundingClientRect();
+  for (const el of dialog.querySelectorAll('.plan-card, .plan-card > *, .friday-chip, .planner-add')) {
+    const a = box(el), b = box(el.closest('.planner-day'));
+    if (el.getClientRects().length && (a.left < b.left - 1 || a.right > b.right + 1 || a.top < b.top - 1 || a.bottom > b.bottom + 1)) {
+      problems.push('overflows its day: ' + el.textContent.trim().slice(0, 24));
+    }
+  }
+  return problems;
 })()`;
 
 async function browser() {

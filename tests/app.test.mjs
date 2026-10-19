@@ -545,3 +545,119 @@ test('What\'s new lists every release and marks one this browser has not opened 
   assert.ok(!link.classList.contains('unseen'));
 });
 
+test('visitors see the Friday lift on the note and its board, and a sign-in prompt in the planner', async () => {
+  let asked=0;
+  const {app,context,document}=await application({listPlans:async()=>{asked++;return [];}});
+  const next=context.Planner.nextFriday();
+  assert.match(document.querySelector('#nextLift .next-lift-name').textContent,new RegExp(next.focus.label));
+  assert.match(document.getElementById('tvNextLift').textContent,new RegExp(next.focus.label));
+  assert.equal(document.querySelector('#nextLift .next-session'),null);
+  // Its board carries a sticker; other lifts get one line on their tab instead.
+  const tagged=[...document.querySelectorAll('.leaderboard-section .friday-tag')].map((tag)=>tag.closest('[data-lift]').dataset.lift);
+  assert.deepEqual(tagged,next.focus.id==='other'?[]:[next.focus.id]);
+  assert.equal(document.getElementById('otherFriday').hidden,next.focus.id!=='other');
+  assert.equal(asked,0,'visitors never ask for plans');
+  assert.equal(document.querySelector('.tab-btn[data-tab="planner"]'),null,'the planner opens from the note only');
+  app.openPlanner();
+  assert.ok(document.getElementById('plannerModal').open);
+  assert.ok(document.querySelector('#plannerBody .planner-notice [data-action="sign-in"]'));
+  assert.equal(document.querySelector('#plannerBody [data-action="plan-add"]'),null);
+});
+test('a failed planner read keeps the boards and says so in the planner', async () => {
+  const {app,store,document}=await application({
+    getSession:async()=>({user:{id:'me'}}),myProfile:async()=>({user_id:'me',status:'active',athlete_id:'A'}),
+    listAthletes:async()=>[athlete('A',{bench:100})],listPlans:async()=>{throw new Error('relation "plans" does not exist');},
+  });
+  assert.equal(app.loadError,null);
+  assert.equal(document.getElementById('retryBtn').hidden,true);
+  assert.match(document.querySelector('[data-lift="bench"] .podium-name').textContent,/A/);
+  assert.match(document.querySelector('#plannerBody .planner-notice.warning').textContent,/could not load/);
+  store.listPlans=async()=>[];
+  await app.refreshAll();
+  assert.equal(document.querySelector('#plannerBody .planner-notice'),null);
+});
+test('members join sessions at their own time, change it or leave, plan their own and remove them', async () => {
+  const tomorrow=new Date(); tomorrow.setDate(tomorrow.getDate()+1); tomorrow.setHours(18,0,0,0);
+  let plans=[{id:'p1',owner:'peer',starts_at:tomorrow.toISOString(),activity:'Squat',note:'Spot me',plan_joins:[]}];
+  const calls=[];
+  const {app,context,document}=await application({
+    getSession:async()=>({user:{id:'me'}}),myProfile:async()=>({user_id:'me',status:'active',athlete_id:'A'}),
+    listProfiles:async()=>[{user_id:'me',athlete_id:'A',github_login:'me'},{user_id:'peer',athlete_id:'B',github_login:'peer'}],
+    listAthletes:async()=>[athlete('A'),athlete('B',{name:'Daniel'})],
+    listPlans:async()=>structuredClone(plans),
+    joinPlan:async(id,join,arrives_at)=>{calls.push(['join',id,join,arrives_at]);plans[0].plan_joins=join?[{user_id:'me',arrives_at,created_at:new Date().toISOString()}]:[];},
+    savePlan:async(...args)=>{calls.push(['save',...args]);},
+    deletePlan:async(id)=>{calls.push(['delete',id]);plans=plans.filter((p)=>p.id!==id);},
+  });
+  const {Planner}=context;
+  // The note's next session opens it in the planner: who comes when, and your time, starting at the host's.
+  assert.match(document.querySelector('#nextLift .next-session-who').textContent,/with Daniel · no one in yet/);
+  await app.actions['open-planner']('p1');
+  assert.ok(document.getElementById('plannerModal').open);
+  assert.equal(app.plannerView(),'session');
+  assert.match(document.querySelector('#planSessionBody .session-people').textContent,/18:00\s*Daniel\s*host/);
+  assert.equal(document.getElementById('joinTime').value,'18:00');
+  assert.equal(document.getElementById('joinSubmit').textContent,'🙋 I\'m in');
+  assert.equal(document.getElementById('joinLeave').hidden,true);
+  document.getElementById('joinTime').value='18:30';
+  await app.submitJoin();
+  const half=new Date(tomorrow); half.setMinutes(30);
+  assert.deepEqual(calls.at(-1),['join','p1',true,half.toISOString()]);
+  assert.equal(app.plannerView(),'week');
+  // The card shows the earliest arrival with a +, and your own time.
+  const card=document.querySelector('[data-plan="p1"]');
+  assert.equal(card.querySelector('.plan-time').textContent,'18:00+');
+  assert.equal(card.querySelector('.plan-join').textContent,'✓ In · 18:30');
+  assert.match(card.querySelector('.plan-joiners').textContent,/you/);
+  assert.match(document.querySelector('#nextLift').textContent,/18:00\+[\s\S]*🙋 1 in/);
+  assert.match(document.getElementById('tvNextLift').textContent,/Next · tomorrow 18:00\+[\s\S]*Squat[\s\S]*🙋 1 in/,'a TV signed in as a member says the same');
+  // Opening it again offers to change the time or leave; a time far from the start is refused.
+  await app.actions['plan-open']('p1');
+  assert.equal(document.getElementById('joinTime').value,'18:30');
+  assert.equal(document.getElementById('joinSubmit').textContent,'Save my time');
+  document.getElementById('joinTime').value='01:00';
+  await assert.rejects(()=>app.submitJoin(),/six hours/);
+  await app.actions['plan-leave']('p1');
+  assert.deepEqual(calls.at(-1),['join','p1',false,undefined]);
+  assert.equal(document.querySelector('[data-plan="p1"] .plan-time').textContent,'18:00');
+  assert.throws(()=>app.openPlanEditor('p1'),/your own/);
+
+  // A plan on a Friday starts as that Friday's lift, until the member writes their own.
+  const friday=Planner.addDays(Planner.nextFriday().date,7);
+  app.openPlanEditor(null,Planner.dayKey(friday));
+  assert.equal(document.getElementById('planForm').hidden,false,'the form takes the week\'s place in the planner');
+  assert.equal(document.getElementById('plannerBody').hidden,true);
+  const date=document.getElementById('planDate'), activity=document.getElementById('planActivity');
+  assert.equal(activity.value,Planner.fridayFocus(friday).label);
+  date.value=Planner.dayKey(Planner.addDays(friday,1)); app.updatePlanFriday();
+  assert.equal(activity.value,'');
+  assert.equal(document.getElementById('planFriday').textContent,'');
+  activity.value='Legs'; date.value=Planner.dayKey(friday); app.updatePlanFriday();
+  assert.equal(activity.value,'Legs');
+  assert.match(document.getElementById('planFriday').textContent,/Friday lift/);
+  document.getElementById('planTime').value='17:15';
+  await app.submitPlan();
+  const [kind,id,startsAt,what,note]=calls.at(-1);
+  assert.deepEqual([kind,id,what,note],['save',null,'Legs',null]);
+  assert.equal(new Date(startsAt).toISOString(),new Date(friday.getFullYear(),friday.getMonth(),friday.getDate(),17,15).toISOString());
+  assert.ok(document.getElementById('plannerModal').open,'saving returns to the week');
+  assert.equal(document.getElementById('planForm').hidden,true);
+  assert.equal(app.plannerWeek,Planner.weekOf(friday),'the planner shows the week of the new plan');
+  // Escape in the form or a session goes back to the week instead of closing the planner.
+  for (const open of [()=>app.openPlanEditor(),()=>app.openSession('p1')]) {
+    open();
+    const escape=new context.Event('cancel',{cancelable:true});
+    document.getElementById('plannerModal').dispatchEvent(escape);
+    assert.ok(escape.defaultPrevented);
+    assert.equal(app.plannerView(),'week');
+  }
+
+  // Removing asks first.
+  context.confirm=()=>false;
+  await app.deletePlan('p1');
+  assert.notEqual(calls.at(-1)[0],'delete');
+  context.confirm=()=>true;
+  await app.deletePlan('p1');
+  assert.deepEqual(calls.at(-1),['delete','p1']);
+  assert.equal(app.plans.length,0);
+});
