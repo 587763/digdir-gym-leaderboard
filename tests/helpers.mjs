@@ -50,7 +50,7 @@ export async function application(overrides = {}, { search = '', hash = '' } = {
   const store = {
     configured: true, getSession: async () => null, listAthletes: async () => [],
     myProfile: async () => null, listProfiles: async () => [], listPendingProposals: async () => [],
-    listRecentPrs: async () => [], listAthleteHistory: async () => [], listPlans: async () => [], onAuthChange() {}, subscribe() {},
+    listRecentPrs: async () => [], listAthleteHistory: async () => [], listPlans: async () => [], listFridayJoins: async () => [], onAuthChange() {}, subscribe() {},
     userLabel: () => 'member', ...overrides,
   };
   context.Store = store;

@@ -6,8 +6,11 @@
 // To shift the rotation (say, to repeat a lift after a holiday), move `start` by a week.
 //
 // Dates are the viewer's local calendar days (the office's time zone); a plan's starts_at is
-// an instant. The planner opens from the Friday note, in a dialog. Planner context (ctx): { now: Date, week: weeks after this one,
+// an instant. The planner opens from the Friday note, in a dialog. Each Friday's lift is also a
+// session people join at their own time: fridayPlan() makes it a plan with no host, whose
+// joins (friday_joins, by date) look like plan_joins. Planner context (ctx): { now: Date, week: weeks after this one,
 //   plans: [{ id, owner, starts_at, activity, note, plan_joins: [{ user_id, arrives_at, created_at }] }],
+//   fridayJoins: [{ day, user_id, arrives_at, created_at }],
 //   loading, error, signedIn, canSee (members on the board and admins, as in SQL can_plan()),
 //   canPlan, isAdmin, me: user id, member(userId) → { name, athlete } }
 window.Planner = (() => {
@@ -60,21 +63,38 @@ window.Planner = (() => {
   // At the weekend the planner opens on the coming week.
   const defaultWeek = (now = new Date()) => (now.getDay() === 0 || now.getDay() === 6 ? 1 : 0);
   const clampWeek = (week) => Math.min(WEEKS - 1, Math.max(0, week));
-  // The span of plans to load: every week the planner can show.
-  const range = (now = new Date()) => ({ from: weekStart(now, 0).toISOString(), to: weekStart(now, WEEKS).toISOString() });
+  // The span of plans (instants) and Friday joins (days) to load: every week the planner can show.
+  const range = (now = new Date()) => ({ from: weekStart(now, 0).toISOString(), to: weekStart(now, WEEKS).toISOString(),
+    fromDay: dayKey(weekStart(now, 0)), toDay: dayKey(weekStart(now, WEEKS)) });
   const weekOf = (date, now = new Date()) => clampWeek(Math.round((dayNumber(monday(date)) - dayNumber(monday(now))) / 7));
 
   // --- plans -------------------------------------------------------------------
-  const isOpen = (plan, now = Date.now()) => Date.parse(plan.starts_at) + OPEN_MS > now;
+  // A Friday's lift as a session: no host, starting at the Friday's midnight, with its joins.
+  // Its id is "friday-YYYY-MM-DD"; null when the day is not a Friday.
+  function fridayPlan(date, fridayJoins = []) {
+    const lift = fridayFocus(date);
+    if (!lift) return null;
+    const key = dayKey(date);
+    return { id: `friday-${key}`, friday: key, owner: null, starts_at: fromKey(key).toISOString(), activity: lift.label,
+      emoji: lift.emoji, note: null, plan_joins: fridayJoins.filter((j) => j.day === key) };
+  }
+  const planById = (id, plans = [], fridayJoins = []) => (String(id).startsWith('friday-')
+    ? (/^friday-\d{4}-\d{2}-\d{2}$/.test(id) ? fridayPlan(fromKey(id.slice(7)), fridayJoins) : null)
+    : plans.find((p) => p.id === id) ?? null);
+  // A session can be joined until two hours after it starts; a Friday's lift all that Friday.
+  const isOpen = (plan, now = Date.now()) => (plan.friday ? addDays(fromKey(plan.friday), 1).getTime()
+    : Date.parse(plan.starts_at) + OPEN_MS) > now;
+  const planEmoji = (plan) => plan.emoji ?? activityEmoji(plan.activity);
   const joiners = (plan) => [...(plan.plan_joins || [])].sort((a, b) => String(a.created_at).localeCompare(String(b.created_at)))
     .map((j) => j.user_id);
   // The last day a plan may start on (partly: plans reach AHEAD_DAYS from this moment).
   const lastDay = (now) => addDays(now, AHEAD_DAYS);
-  // Who comes when, earliest first: the host at the start, everyone who joined at their own time.
-  const arrivals = (plan) => [{ user_id: plan.owner, at: Date.parse(plan.starts_at), host: true },
+  // Who comes when, earliest first: the host (none on a Friday's lift) at the start, everyone
+  // who joined at their own time.
+  const arrivals = (plan) => [...(plan.owner ? [{ user_id: plan.owner, at: Date.parse(plan.starts_at), host: true }] : []),
     ...(plan.plan_joins || []).map((j) => ({ user_id: j.user_id, at: Date.parse(j.arrives_at ?? plan.starts_at), host: false }))]
     .sort((a, b) => a.at - b.at || b.host - a.host);
-  const earliest = (plan) => arrivals(plan)[0].at;
+  const earliest = (plan) => arrivals(plan)[0]?.at ?? Date.parse(plan.starts_at);
   // When a joiner comes, or null when they haven't joined.
   const arrivalOf = (plan, userId) => arrivals(plan).find((a) => a.user_id === userId && !a.host)?.at ?? null;
   const byEarliest = (a, b) => earliest(a) - earliest(b);
@@ -107,23 +127,24 @@ window.Planner = (() => {
     if (remark.length > NOTE_MAX) throw new Error(`Keep the note to ${NOTE_MAX} characters.`);
     return { startsAt: start.toISOString(), activity: what, note: remark || null };
   }
-  // The join form's time → an instant on the session's day, or an Error saying what to fix.
+  // The join form's time → an instant on the session's day, or an Error saying what to fix. A
+  // planned session takes times within six hours of its start; a Friday's lift any time that day.
   function readArrival(plan, time) {
     const clock = String(time || '').match(/^(\d{2}):(\d{2})/);
     if (!clock || Number(clock[1]) > 23 || Number(clock[2]) > 59) throw new Error('Pick a time, like 16:30.');
     const start = new Date(plan.starts_at);
     const at = new Date(start.getFullYear(), start.getMonth(), start.getDate(), Number(clock[1]), Number(clock[2]));
-    if (Math.abs(at - start) > ARRIVAL_MS) throw new Error('Pick a time within six hours of the session\'s start.');
+    if (!plan.friday && Math.abs(at - start) > ARRIVAL_MS) throw new Error('Pick a time within six hours of the session\'s start.');
     return at.toISOString();
   }
 
   // --- labels ------------------------------------------------------------------
   const formatDay = (date) => date.toLocaleDateString(LOCALE, { weekday: 'short', day: 'numeric', month: 'short' });
   const formatTime = (when) => new Date(when).toLocaleTimeString(LOCALE, { hour: '2-digit', minute: '2-digit' });
-  // The earliest arrival: "13:00", or "13:00+" when someone comes later.
+  // The earliest arrival: "13:00", or "13:00+" when someone comes later; "" before anyone joins a Friday.
   const timeLabel = (plan) => {
     const times = arrivals(plan).map((a) => a.at);
-    return `${formatTime(times[0])}${times.some((t) => t > times[0]) ? '+' : ''}`;
+    return times.length ? `${formatTime(times[0])}${times.some((t) => t > times[0]) ? '+' : ''}` : '';
   };
   const timeValue = (iso) => { const d = new Date(iso); return `${pad(d.getHours())}:${pad(d.getMinutes())}`; };
   const whenLabel = (daysAway, date) => daysAway === 0 ? 'today' : daysAway === 1 ? 'tomorrow' : `${formatDay(date)} · in ${daysAway} days`;
@@ -147,26 +168,33 @@ window.Planner = (() => {
   }
 
   // --- markup ------------------------------------------------------------------
-  // What the Friday note and the TV header show: this Friday's lift, and for members the next
-  // planned session, which comes first (the Friday lift shrinking to a labelled emoji) when it
-  // is on a day before Friday. ctx: { now, canSee, error, plan, me, member }.
-  function noteState({ now = new Date(), canSee = false, error = false, plan = null, me = null, member } = {}) {
+  // What the Friday note and the TV header show: this Friday's lift, and for members who joins
+  // it and the next planned session, which comes first (the Friday lift shrinking to a labelled
+  // emoji) when it is on a day before Friday. ctx: { now, canSee, error, plan, fridayJoins, me, member }.
+  function noteState({ now = new Date(), canSee = false, error = false, plan = null, fridayJoins = [], me = null, member } = {}) {
     const next = nextFriday(now);
     const shown = canSee && !error;
     const going = plan ? joiners(plan).length : 0;
-    return { now, next, shown, plan: shown ? plan : null, first: shown && !!plan && earliest(plan) < next.date.getTime(),
+    const friday = shown ? fridayPlan(next.date, fridayJoins) : null;
+    const fridayGoing = friday ? joiners(friday).length : 0;
+    const myFriday = friday && arrivalOf(friday, me);
+    return { now, next, shown, friday, plan: shown ? plan : null, first: shown && !!plan && earliest(plan) < next.date.getTime(),
       who: plan && (plan.owner === me ? 'Your session' : `with ${member(plan.owner).name}`),
-      count: going ? `🙋 ${going} in` : 'no one in yet' };
+      count: going ? `🙋 ${going} in` : 'no one in yet',
+      // "✓ In at 13:30 · 🙋 2 in", "from 13:00 · 🙋 2 in", or "🙋 Join" before anyone has.
+      fridayWho: friday && (myFriday != null ? `✓ In at ${formatTime(myFriday)} · 🙋 ${fridayGoing} in`
+        : fridayGoing ? `from ${formatTime(earliest(friday))} · 🙋 ${fridayGoing} in` : '🙋 Join') };
   }
 
-  // The sticky note by the member controls, with the way into the planner.
+  // The sticky note by the member controls, with the way into the planner. Without a planned
+  // session it shows only the Friday lift.
   function fridayNote(ctx = {}) {
-    const { now, next, shown, plan, first, who, count } = noteState(ctx);
+    const { now, next, friday: fridaySession, plan, first, who, count, fridayWho } = noteState(ctx);
     const session = () => {
-      if (!plan) return html`<div class="next-session"><p class="next-lift-eyebrow">Next session</p><p class="next-session-what">Nothing planned yet</p></div>`;
+      if (!plan) return '';
       return html`<button type="button" class="next-session${first && ' lead'}" data-action="open-planner" data-id="${plan.id}" aria-label="Next session, ${sessionWhen(plan, now)}: ${plan.activity}, ${who}, ${count}. See who comes when">
         <span class="next-lift-eyebrow">Next session · ${sessionWhen(plan, now)}</span>
-        <span class="next-session-what">${icon(activityEmoji(plan.activity))} ${plan.activity}</span>
+        <span class="next-session-what">${icon(planEmoji(plan))} ${plan.activity}</span>
         <span class="next-session-who">${who} · ${count}</span>
       </button>`;
     };
@@ -175,8 +203,9 @@ window.Planner = (() => {
       : html`<div class="next-lift-main">
           <h2 class="next-lift-eyebrow" id="nextLiftTitle">Friday lift · <span class="next-lift-when">${whenLabel(next.daysAway, next.date)}</span></h2>
           <p class="next-lift-name">${icon(next.focus.emoji)} ${next.focus.label}</p>
+          ${fridaySession && isOpen(fridaySession, now.getTime()) && html`<button type="button" class="next-friday-who" data-action="open-planner" data-id="${fridaySession.id}" aria-label="Friday lift: ${fridayWho}. See who comes when">${fridayWho}</button>`}
         </div>`;
-    return html`${first ? html`${session()}${friday}` : html`${friday}${shown && session()}`}
+    return html`${first ? html`${session()}${friday}` : html`${friday}${session()}`}
       <button type="button" class="btn btn-secondary btn-small" data-action="open-planner">📅 Planner</button>`;
   }
 
@@ -195,12 +224,14 @@ window.Planner = (() => {
   // The same in one line for the TV header: no controls, readable across the room. A TV that
   // is signed out (as office screens usually are) sees only the Friday lift.
   function tvNote(ctx = {}) {
-    const { now, next, plan, first, count } = noteState(ctx);
+    const { now, next, friday: fridaySession, plan, first, count } = noteState(ctx);
+    const fridayGoing = fridaySession ? joiners(fridaySession).length : 0;
     const friday = first
       ? html`<span class="tv-part tv-friday compact"><span class="tv-next-lift-when">Friday</span> ${next.focus.emoji}</span>`
-      : html`<span class="tv-part tv-friday"><span class="tv-next-lift-when">${next.daysAway === 0 ? 'Today' : 'Friday'}</span> ${icon(next.focus.emoji)} ${next.focus.label}</span>`;
+      : html`<span class="tv-part tv-friday"><span class="tv-next-lift-when">${next.daysAway === 0 ? 'Today' : 'Friday'}</span> ${icon(next.focus.emoji)} ${next.focus.label}${
+        fridayGoing > 0 && html`<span class="tv-session-who">from ${formatTime(earliest(fridaySession))} · 🙋 ${fridayGoing} in</span>`}</span>`;
     const session = plan && html`<span class="tv-part tv-session${first && ' lead'}"><span class="tv-next-lift-when">Next · ${sessionWhen(plan, now)}</span>
-      <span class="tv-session-what">${icon(activityEmoji(plan.activity))} ${plan.activity}</span><span class="tv-session-who">${count}</span></span>`;
+      <span class="tv-session-what">${icon(planEmoji(plan))} ${plan.activity}</span><span class="tv-session-who">${count}</span></span>`;
     return html`<span class="tv-note${first ? ' session-first' : ' friday-first'}">${first ? html`${session}${friday}` : html`${friday}${session}`}</span>`;
   }
 
@@ -218,7 +249,7 @@ window.Planner = (() => {
     return html`<li class="plan-card${mine && ' mine'}${joined && ' joined'}${!open && ' over'}" data-plan="${plan.id}">
       ${!mine && ctx.isAdmin && html`<button type="button" class="plan-remove" data-action="plan-delete" data-id="${plan.id}" aria-label="${removeLabel}" title="Remove (admin)">&times;</button>`}
       <p class="plan-what"><time class="plan-time" datetime="${new Date(earliest(plan)).toISOString()}">${timeLabel(plan)}</time>
-        <button type="button" class="plan-activity" data-action="plan-open" data-id="${plan.id}" title="Who comes when">${icon(activityEmoji(plan.activity))} ${plan.activity}</button></p>
+        <button type="button" class="plan-activity" data-action="plan-open" data-id="${plan.id}" title="Who comes when">${icon(planEmoji(plan))} ${plan.activity}</button></p>
       ${plan.note && html`<p class="plan-note">${plan.note}</p>`}
       <p class="plan-people"><span class="plan-host">${avatar(host)}<span>${mine ? 'You' : host.name}</span></span>${going.length > 0
         && html`<span class="plan-joiners">+ ${names(others)}</span>`}</p>
@@ -231,15 +262,34 @@ window.Planner = (() => {
     </li>`;
   }
 
+  // A Friday's lift in the planner: its sticky note, who's in from when, and I'm in.
+  function fridayCard(plan, ctx) {
+    const open = isOpen(plan, ctx.now.getTime());
+    const going = arrivals(plan).map((a) => a.user_id); // in the order they come
+    const mine = arrivalOf(plan, ctx.me);
+    const day = formatDay(new Date(plan.starts_at));
+    return html`<div class="friday-chip friday-card${mine != null && ' joined'}" data-plan="${plan.id}">
+      <span class="friday-chip-label">Friday lift${going.length > 0 && ` · ${timeLabel(plan)}`}</span>
+      <button type="button" class="plan-activity" data-action="plan-open" data-id="${plan.id}" title="Who comes when">${icon(plan.emoji)} ${plan.activity}</button>
+      ${going.length > 0 && html`<span class="friday-card-who">🙋 ${names(going.map((id) => (id === ctx.me ? 'you' : ctx.member(id).name)))}</span>`}
+      ${ctx.canPlan && open && (mine != null
+        ? html`<button type="button" class="btn btn-small plan-join joined" data-action="plan-open" data-id="${plan.id}" aria-label="You're in at ${formatTime(mine)}: change your time or leave the Friday lift, ${day}">✓ In · ${formatTime(mine)}</button>`
+        : html`<button type="button" class="btn btn-small plan-join" data-action="plan-open" data-id="${plan.id}" aria-label="I'm in: the Friday lift, ${plan.activity}, ${day}. Choose your time">🙋 I'm in</button>`)}
+    </div>`;
+  }
+
   // The session view in the planner: what, when, and who comes when, earliest first. The join
   // form below it is static markup (app.js), so a refresh never loses a time being typed.
   function session(plan, ctx) {
     if (!plan) return html`<h3 class="session-title" id="planSessionTitle" tabindex="-1">This session is no longer planned.</h3>`;
-    return html`<h3 class="session-title" id="planSessionTitle" tabindex="-1">${icon(activityEmoji(plan.activity))} ${plan.activity}</h3>
-      <p class="session-when">${formatDay(new Date(plan.starts_at))} · ${timeLabel(plan)}${!isOpen(plan, ctx.now.getTime()) && ' · over'}</p>
+    const people = arrivals(plan);
+    return html`${plan.friday && html`<p class="next-lift-eyebrow session-eyebrow">Friday lift</p>`}
+      <h3 class="session-title" id="planSessionTitle" tabindex="-1">${icon(planEmoji(plan))} ${plan.activity}</h3>
+      <p class="session-when">${formatDay(new Date(plan.starts_at))}${people.length > 0 && ` · ${timeLabel(plan)}`}${!isOpen(plan, ctx.now.getTime()) && ' · over'}</p>
       ${plan.note && html`<p class="plan-note">${plan.note}</p>`}
       <h4 class="form-section-title">Who comes when</h4>
-      <ol class="session-people">${arrivals(plan).map((arrival) => {
+      ${people.length === 0 && html`<p class="planner-empty">No one has said they're coming yet.</p>`}
+      <ol class="session-people">${people.map((arrival) => {
         const person = ctx.member(arrival.user_id);
         return html`<li${arrival.user_id === ctx.me && UI.raw(' class="is-me"')}><time class="plan-time" datetime="${new Date(arrival.at).toISOString()}">${formatTime(arrival.at)}</time>
           ${avatar(person, 28)}<span class="session-name">${arrival.user_id === ctx.me ? 'You' : person.name}</span>${arrival.host && html` <span class="tag tag-peer">host</span>`}</li>`;
@@ -276,7 +326,8 @@ window.Planner = (() => {
       return html`<li class="planner-day${past && ' past'}${key === dayKey(today) && ' today'}${friday && ' friday'}" data-day="${key}">
         <h4 class="planner-day-head"><span class="planner-weekday">${date.toLocaleDateString(LOCALE, { weekday: 'short' })}</span>
           <span class="planner-date">${date.toLocaleDateString(LOCALE, { day: 'numeric', month: 'short' })}</span>${key === dayKey(today) && html`<span class="planner-today">today</span>`}</h4>
-        ${friday && html`<p class="friday-chip"><span class="friday-chip-label">Friday lift</span> ${icon(friday.emoji)} ${friday.label}</p>`}
+        ${friday && (showPlans ? fridayCard(fridayPlan(date, ctx.fridayJoins), ctx)
+          : html`<p class="friday-chip"><span class="friday-chip-label">Friday lift</span> ${icon(friday.emoji)} ${friday.label}</p>`)}
         ${plans.length > 0 ? html`<ul class="planner-plans">${plans.map((p) => planCard(p, ctx))}</ul>`
           : showPlans && !ctx.loading && !canAdd && html`<p class="planner-empty">Nothing planned</p>`}
         ${canAdd && html`<button type="button" class="planner-add" data-action="plan-add" data-id="${key}" aria-label="Plan a session on ${label}">+ Add</button>`}
@@ -295,7 +346,7 @@ window.Planner = (() => {
   }
 
   return { ROTATION, OPEN_MS, WEEKS, dayKey, fromKey, addDays, fridayFocus, nextFriday,
-    weekStart, defaultWeek, clampWeek, range, weekOf, isOpen, joiners, arrivals, arrivalOf, timeLabel, nextPlan, activityEmoji,
+    weekStart, defaultWeek, clampWeek, range, weekOf, fridayPlan, planById, isOpen, joiners, arrivals, earliest, arrivalOf, timeLabel, nextPlan, activityEmoji,
     suggestions, readPlan, readArrival, formatDay, formatTime, timeValue, lastDay, fridayNote, fridayBoard, otherCallout, tvNote,
     week, session };
 })();

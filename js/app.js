@@ -21,6 +21,7 @@ class LeaderboardApp {
     this.proposals = [];
     this.recentPrs = [];
     this.plans = [];        // planned sessions (members on the board only), with who joins them
+    this.fridayJoins = [];  // who joins the Friday lift, by day (members on the board only)
     this.plansError = null; // the planner failed to load; the boards still work
     this.plannerWeek = Planner.defaultWeek(); // weeks after this one shown in the planner
     this.seenPrIds = null; // verified PRs already on screen; null until the first load
@@ -76,6 +77,7 @@ class LeaderboardApp {
         this.profiles = [];
         this.proposals = [];
         this.plans = [];
+        this.fridayJoins = [];
         this.plansError = null;
         UI.dialogs.closeAll();
         this.reflectAuth();
@@ -141,10 +143,11 @@ class LeaderboardApp {
   async readBoard() {
     const session = await Store.getSession();
     const user = session?.user ?? null;
-    const { from, to } = Planner.range();
-    // The planner is extra: when its read fails, the boards still load and its tab says so.
-    const plans = user ? Promise.resolve().then(() => Store.listPlans(from, to)).then((list) => ({ list }), (error) => ({ error }))
-      : { list: [] };
+    const { from, to, fromDay, toDay } = Planner.range();
+    // The planner is extra: when its read fails, the boards still load and the planner says so.
+    const plans = user ? Promise.resolve().then(() => Promise.all([Store.listPlans(from, to), Store.listFridayJoins(fromDay, toDay)]))
+      .then(([list, fridays]) => ({ list, fridays }), (error) => ({ error }))
+      : { list: [], fridays: [] };
     const [athletes, recentPrs, profile, profiles, proposals, planned] = await Promise.all([
       Store.listAthletes(),
       Store.listRecentPrs(),
@@ -154,7 +157,7 @@ class LeaderboardApp {
       plans,
     ]);
     return { user, allAthletes: athletes, recentPrs, profile, profiles, proposals,
-      plans: planned.list ?? this.plans, plansError: planned.error ?? null };
+      plans: planned.list ?? this.plans, fridayJoins: planned.fridays ?? this.fridayJoins, plansError: planned.error ?? null };
   }
 
   withTimeout(promise, ms = this.readTimeoutMs) {
@@ -173,7 +176,7 @@ class LeaderboardApp {
     return JSON.stringify([this.user, this.profile, this.allAthletes, this.profiles,
       this.proposals, this.recentPrs, this.loading, !!this.loadError, this.bodyweight,
       this.latestPrs().map((item) => UI.timeAgo(item.at)), [...this.freshPrs().keys()],
-      this.proposals.map((p) => UI.timeAgo(p.created_at)), this.plans, !!this.plansError, this.plannerWeek,
+      this.proposals.map((p) => UI.timeAgo(p.created_at)), this.plans, this.fridayJoins, !!this.plansError, this.plannerWeek,
       Planner.dayKey(new Date()), this.plans.map((p) => [Planner.isOpen(p), Date.parse(p.starts_at) <= Date.now()])]);
   }
 
@@ -996,7 +999,7 @@ class LeaderboardApp {
   // the TV header, the Other Lifts line when they are up, and the planner dialog's week and session.
   renderPlanner() {
     const now = new Date();
-    const note = { now, canSee: this.canPlan, error: !!this.plansError, plan: Planner.nextPlan(this.plans, now),
+    const note = { now, canSee: this.canPlan, error: !!this.plansError, plan: Planner.nextPlan(this.plans, now), fridayJoins: this.fridayJoins,
       me: this.user?.id ?? null, member: (id) => this.memberOf(id) };
     document.getElementById('nextLift').innerHTML = Planner.fridayNote(note);
     document.getElementById('tvNextLift').innerHTML = Planner.tvNote(note);
@@ -1012,7 +1015,7 @@ class LeaderboardApp {
 
   plannerContext(now = new Date()) {
     return {
-      now, week: this.plannerWeek, plans: this.plans, loading: this.loading, error: !!this.plansError,
+      now, week: this.plannerWeek, plans: this.plans, fridayJoins: this.fridayJoins, loading: this.loading, error: !!this.plansError,
       signedIn: this.signedIn, configured: Store.configured, canSee: this.canPlan, canPlan: this.canPlan,
       isAdmin: this.isAdmin, me: this.user?.id ?? null, member: (id) => this.memberOf(id),
     };
@@ -1025,7 +1028,8 @@ class LeaderboardApp {
     return { name: athlete?.name || (profile?.github_login ? `@${profile.github_login}` : 'a member'), athlete };
   }
 
-  planById(id) { return this.plans.find((p) => p.id === id); }
+  // A planned session, or a Friday's lift ("friday-YYYY-MM-DD") with who joins it.
+  planById(id) { return Planner.planById(id, this.plans, this.fridayJoins); }
 
   // The Friday note opens the planner on the week of the coming Friday, or straight on the
   // session clicked.
@@ -1070,7 +1074,9 @@ class LeaderboardApp {
     this.plannerWeek = Planner.weekOf(new Date(plan.starts_at)); // Back shows its week
     this.viewingPlan = plan.id;
     this.render();
-    document.getElementById('joinTime').value = Planner.timeValue(Planner.arrivalOf(plan, this.user?.id) ?? plan.starts_at);
+    // Your time, else the host's start; on a Friday's lift the earliest arrival, or blank to pick.
+    const suggested = Planner.arrivalOf(plan, this.user?.id) ?? (plan.friday ? Planner.arrivals(plan)[0]?.at : plan.starts_at);
+    document.getElementById('joinTime').value = suggested == null ? '' : Planner.timeValue(suggested);
     this.showPlannerView('session');
   }
 
@@ -1086,7 +1092,8 @@ class LeaderboardApp {
     const leave = document.getElementById('joinLeave');
     leave.hidden = !joined;
     leave.dataset.id = plan.id;
-    document.getElementById('joinHint').textContent = `${this.memberOf(plan.owner).name} starts at ${Planner.formatTime(plan.starts_at)}.`;
+    document.getElementById('joinHint').textContent = !plan.friday ? `${this.memberOf(plan.owner).name} starts at ${Planner.formatTime(plan.starts_at)}.`
+      : Planner.arrivals(plan).length ? `Others come from ${Planner.formatTime(Planner.earliest(plan))}.` : 'Pick when you\'ll come.';
   }
 
   stepPlannerWeek(step) {
@@ -1160,14 +1167,17 @@ class LeaderboardApp {
     if (!plan) throw new Error('This session is no longer planned.');
     const joined = Planner.arrivalOf(plan, this.user?.id) != null;
     const arrivesAt = Planner.readArrival(plan, document.getElementById('joinTime').value);
-    await Store.joinPlan(plan.id, true, arrivesAt);
+    if (plan.friday) await Store.joinFriday(plan.friday, true, arrivesAt);
+    else await Store.joinPlan(plan.id, true, arrivesAt);
     await this.refreshAll();
     this.showPlannerView('week');
     UI.toast(joined ? `Your time is now ${Planner.formatTime(arrivesAt)}` : `You're in at ${Planner.formatTime(arrivesAt)} 💪`, 'success');
   }
 
   async leavePlan(id) {
-    await Store.joinPlan(id, false);
+    const plan = this.planById(id);
+    if (plan?.friday) await Store.joinFriday(plan.friday, false);
+    else await Store.joinPlan(id, false);
     await this.refreshAll();
     this.showPlannerView('week');
     UI.toast("You've left the session", 'success');

@@ -27,6 +27,7 @@
   const PROFILE_COLUMNS = 'user_id, github_login, display_name, is_admin, status, athlete_id';
   const PROPOSAL_COLUMNS = 'id, kind, approval, athlete_id, proposer, payload, status, created_at';
   const PLAN_COLUMNS = 'id, owner, starts_at, activity, note, plan_joins(user_id, arrives_at, created_at)';
+  const FRIDAY_JOIN_COLUMNS = 'day, user_id, arrives_at, created_at';
 
   const connected = () => {
     if (!client) throw new Error('Not connected to the leaderboard database.');
@@ -127,6 +128,12 @@
         .gte('starts_at', from).lt('starts_at', to).order('starts_at'));
     },
 
+    // Who joins the Friday lift on the Fridays from fromDay up to toDay (YYYY-MM-DD). Members only (0011).
+    async listFridayJoins(fromDay, toDay) {
+      if (!client) return [];
+      return rows(client.from('friday_joins').select(FRIDAY_JOIN_COLUMNS).gte('day', fromDay).lt('day', toDay));
+    },
+
     // --- governed writes (RPCs enforce all the rules) -----------------------
     async propose(kind, athleteId, payload) {
       return rows(connected().rpc('propose', { p_kind: kind, p_athlete: athleteId, p_payload: payload || {} }));
@@ -169,6 +176,11 @@
       const { error } = await connected().rpc('join_plan', { p_id: id, p_join: join, p_arrives_at: arrivesAt });
       if (error) throw error;
     },
+    // Join a Friday's lift (day: YYYY-MM-DD) coming at arrivesAt, change that time, or leave (0011).
+    async joinFriday(day, join, arrivesAt = null) {
+      const { error } = await connected().rpc('join_friday', { p_day: day, p_join: join, p_arrives_at: arrivesAt });
+      if (error) throw error;
+    },
 
     // --- admin-only direct writes (RLS gates these to admins) ---------------
     // Each selects the affected row, so an RLS-denied no-op cannot look successful.
@@ -209,6 +221,7 @@
         .channel('planner-changes')
         .on('postgres_changes', { event: '*', schema: 'public', table: 'plans' }, cb)
         .on('postgres_changes', { event: '*', schema: 'public', table: 'plan_joins' }, cb)
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'friday_joins' }, cb)
         .subscribe();
       return () => { client.removeChannel(channel); client.removeChannel(planner); };
     },

@@ -579,6 +579,7 @@ test('a failed planner read keeps the boards and says so in the planner', async 
 test('members join sessions at their own time, change it or leave, plan their own and remove them', async () => {
   const tomorrow=new Date(); tomorrow.setDate(tomorrow.getDate()+1); tomorrow.setHours(18,0,0,0);
   let plans=[{id:'p1',owner:'peer',starts_at:tomorrow.toISOString(),activity:'Squat',note:'Spot me',plan_joins:[]}];
+  let fridayJoins=[];
   const calls=[];
   const {app,context,document}=await application({
     getSession:async()=>({user:{id:'me'}}),myProfile:async()=>({user_id:'me',status:'active',athlete_id:'A'}),
@@ -588,6 +589,8 @@ test('members join sessions at their own time, change it or leave, plan their ow
     joinPlan:async(id,join,arrives_at)=>{calls.push(['join',id,join,arrives_at]);plans[0].plan_joins=join?[{user_id:'me',arrives_at,created_at:new Date().toISOString()}]:[];},
     savePlan:async(...args)=>{calls.push(['save',...args]);},
     deletePlan:async(id)=>{calls.push(['delete',id]);plans=plans.filter((p)=>p.id!==id);},
+    listFridayJoins:async()=>structuredClone(fridayJoins),
+    joinFriday:async(day,join,arrives_at)=>{calls.push(['friday',day,join,arrives_at]);fridayJoins=join?[{day,user_id:'me',arrives_at,created_at:new Date().toISOString()}]:[];},
   });
   const {Planner}=context;
   // The note's next session opens it in the planner: who comes when, and your time, starting at the host's.
@@ -651,6 +654,21 @@ test('members join sessions at their own time, change it or leave, plan their ow
     assert.ok(escape.defaultPrevented);
     assert.equal(app.plannerView(),'week');
   }
+
+  // The Friday lift is joined the same way, at a time on that Friday.
+  const fridayKey=Planner.dayKey(friday);
+  await app.actions['plan-open'](`friday-${fridayKey}`);
+  assert.equal(app.plannerView(),'session');
+  assert.equal(document.getElementById('joinTime').value,'','nobody has joined yet: pick a time');
+  assert.equal(document.getElementById('joinHint').textContent,'Pick when you\'ll come.');
+  document.getElementById('joinTime').value='15:45';
+  await app.submitJoin();
+  const quarter=new Date(friday); quarter.setHours(15,45,0,0);
+  assert.deepEqual(calls.at(-1),['friday',fridayKey,true,quarter.toISOString()]);
+  assert.equal(document.querySelector(`[data-day="${fridayKey}"] .friday-card .plan-join`).textContent,'✓ In · 15:45');
+  await app.actions['plan-leave'](`friday-${fridayKey}`);
+  assert.deepEqual(calls.at(-1),['friday',fridayKey,false,undefined]);
+  assert.equal(document.querySelector(`[data-day="${fridayKey}"] .friday-card .plan-join`).textContent,'🙋 I\'m in');
 
   // Removing asks first.
   context.confirm=()=>false;
