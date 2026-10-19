@@ -81,7 +81,7 @@ const CHECK_TV = `(() => {
   // The latest PRs line: on every tab, showing whole items only (the rest wrap out of sight), and
   // names that fit without clipping their letters.
   const strip = document.getElementById('tvLatest');
-  if (!strip.hidden) {
+  if (!strip.hidden && !document.documentElement.classList.contains('tv-latest-withdrawn')) {
     const line = strip.getBoundingClientRect();
     if (!strip.getClientRects().length) problems.push('latest PRs line is missing');
     const shown = [...strip.querySelectorAll('.tv-latest-item')].filter((li) => li.getBoundingClientRect().top < line.bottom - 1);

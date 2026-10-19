@@ -480,6 +480,29 @@ test('the TV shows the latest verified PRs under every tab, and nothing without 
   await app.refreshAll();
   assert.equal(strip.hidden,true);
 });
+test('the TV latest-PRs line gives way on a tab whose rows would not fit beside it', async () => {
+  const pr={id:'pr',athlete_id:'P0',payload:{lift:'bench',value:100,previous_value:90},decided_at:new Date().toISOString()};
+  const athletes=Array.from({length:6},(_,i)=>athlete(`P${i}`,{bench:100-i}));
+  const {app,context,document}=await application({listAthletes:async()=>athletes,listRecentPrs:async()=>[pr]});
+  context.innerHeight=700; // short TV: ranked tables, no podiums
+  app.tv.enabled=true; app.tv.restart=()=>{};
+  const root=document.documentElement;
+  // The frame is 50px taller without the line; rows are as tall as the test says.
+  document.querySelector('.tab-content.active').getBoundingClientRect=()=>({bottom:root.classList.contains('tv-latest-withdrawn')?650:600});
+  let rowHeight=480;
+  const renderBoard=app.renderBoard.bind(app);
+  app.renderBoard=(lift,podiumFits)=>{
+    const section=renderBoard(lift,podiumFits);
+    section.querySelector('tbody').getBoundingClientRect=()=>({top:100});
+    section.querySelectorAll('tbody tr').forEach((row)=>{row.getBoundingClientRect=()=>({height:rowHeight});});
+    return section;
+  };
+  app.tv.fit();
+  assert.ok(root.classList.contains('tv-latest-withdrawn'),'a 480px row has 452px beside the line, 502px without it');
+  rowHeight=80;
+  app.tv.fit();
+  assert.ok(!root.classList.contains('tv-latest-withdrawn'),'the line comes back when rows fit');
+});
 test('a TV ranks by bodyweight only when it was turned on', async () => {
   const listAthletes=async()=>[athlete('a',{bench:100,bodyweight:80})];
   const tv=await application({listAthletes},{search:'?tv'});

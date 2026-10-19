@@ -806,6 +806,8 @@ html.tv-mode, .tv-mode body { height: 100vh; overflow: hidden; }
 /* The latest verified PRs: one quiet line along the bottom of every tab. Items that don't fit
    wrap onto a second line, which is clipped out of sight. */
 .tv-latest { display: none; }
+/* fit() withdraws it on a tab whose rows would not fit beside it (see js/tv.js). */
+html.tv-latest-withdrawn .tv-latest { display: none; }
 .tv-mode .tv-latest {
   display: flex; align-items: center; gap: 18px; flex: 0 0 auto; height: 2.6rem; margin-top: 6px; padding: 0 4px; overflow: hidden;
   border-top: 2px dashed var(--line); color: var(--ink-soft);
