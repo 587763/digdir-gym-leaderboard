@@ -31,7 +31,7 @@ window.BoardView = (() => {
   const scoreHeading = (lift) => lift.id === 'total' ? 'Total (kg)' : HEADINGS[lift.unit] ?? 'PR (kg)';
 
   const badges = (athlete) => window.ACHIEVEMENTS.filter((a) => window.hasAchievement(athlete, a))
-    .map((a) => html`<span class="badge-chip" title="${a.name}">${a.emoji}</span>`);
+    .map((a) => html`<span class="badge-chip achievement-chip" title="${a.name}">${a.emoji}</span>`);
 
   // Status chips after a name: a pending change, or a PR verified in the last week
   // (on a bodyweight board, a fresh PR in the exercise it adjusts).

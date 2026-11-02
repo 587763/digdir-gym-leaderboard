@@ -484,7 +484,7 @@ test('the TV shows the latest verified PRs under every tab, and nothing without 
   await app.refreshAll();
   assert.equal(strip.hidden,true);
 });
-test('the TV latest-PRs line gives way on a tab whose rows would not fit beside it', async () => {
+test('the TV latest-PRs line, then the badges, give way on a tab whose rows would not fit', async () => {
   const pr={id:'pr',athlete_id:'P0',payload:{lift:'bench',value:100,previous_value:90},decided_at:new Date().toISOString()};
   const athletes=Array.from({length:6},(_,i)=>athlete(`P${i}`,{bench:100-i}));
   const {app,context,document}=await application({listAthletes:async()=>athletes,listRecentPrs:async()=>[pr]});
@@ -503,9 +503,14 @@ test('the TV latest-PRs line gives way on a tab whose rows would not fit beside 
   };
   app.tv.fit();
   assert.ok(root.classList.contains('tv-latest-withdrawn'),'a 480px row has 452px beside the line, 502px without it');
+  assert.ok(!root.classList.contains('tv-badges-withdrawn'),'the badges stay when that is enough');
+  rowHeight=520;
+  app.tv.fit();
+  assert.ok(root.classList.contains('tv-latest-withdrawn')&&root.classList.contains('tv-badges-withdrawn'),'then the badges give way too');
   rowHeight=80;
   app.tv.fit();
   assert.ok(!root.classList.contains('tv-latest-withdrawn'),'the line comes back when rows fit');
+  assert.ok(!root.classList.contains('tv-badges-withdrawn'),'and so do the badges');
 });
 test('a TV ranks by bodyweight only when it was turned on', async () => {
   const listAthletes=async()=>[athlete('a',{bench:100,bodyweight:80})];

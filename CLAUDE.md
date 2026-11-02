@@ -242,7 +242,9 @@ still advances. A PR verified while the board is open gets a celebration banner.
   show; it is hidden without PRs. The active tab's frame shrinks above it, so `fit()` pages as
   before; and when a ranked row would be taller than a page beside it (long wrapped names on a
   small TV), `fit()` withdraws the line on that tab (`html.tv-latest-withdrawn`), as it does
-  podiums, and brings it back on the next fit. The fixture banner sits at the top on TV to keep the line clear.
+  podiums, and brings it back on the next fit. If a row still can't fit, the achievement badges
+  after names give way too (`html.tv-badges-withdrawn` hides `.achievement-chip`; ⏳ and 🔥
+  stay). The fixture banner sits at the top on TV to keep the line clear.
 - The Friday note becomes one sticky line in the TV header (`#tvNextLift`), taking no board
   height: the Friday lift, plus the next session on a TV signed in as a member (a signed-out
   TV cannot read plans). Below 1500px wide a Friday-first line stacks its two parts so it stays
