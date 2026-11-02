@@ -29,6 +29,16 @@ test('every board view escapes athlete names', () => {
   }
 });
 
+test('the 1000 lb Club comes from the total, not from a stored claim', () => {
+  const over = athlete('over', { name: 'Over', squat: 180, bench: 120, deadlift: 153.6 });   // 453.6 kg ≥ 1000 lb
+  const under = athlete('under', { name: 'Under', squat: 180, bench: 120, deadlift: 153.5, achievements: ['total1000lb'] });
+  assert.match(String(BoardView.badges(over)), /🦍/);
+  assert.doesNotMatch(String(BoardView.badges(under)), /🦍/);
+  const club = String(BoardView.hallOfFame(ctx([over, under]))).split('achievement-section').find((s) => s.includes('1000 lb Club'));
+  assert.match(club, /Over[^]*1 person has earned this/);
+  assert.doesNotMatch(club, /Under/);
+});
+
 test('podium and table rows both show pending and fresh markers, and highlight the member', () => {
   const athletes = [1, 2, 3, 4].map((i) => athlete(`a${i}`, { bench: 100 - i }));
   const marks = { pending: new Set(['a1', 'a4']), fresh: new Map([['a1:bench', new Date().toISOString()]]), me: 'a4' };

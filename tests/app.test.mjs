@@ -217,8 +217,12 @@ test('editing an athlete preserves unregistered achievements and uses the openin
 test('My PRs never propose removing achievements that have no visible form field', async () => {
   const {app,store,document}=await application({
     getSession:async()=>({user:{id:'user'}}),myProfile:async()=>({status:'active',athlete_id:'me'}),
-    listAthletes:async()=>[athlete('me',{achievements:['legacy-achievement']})],
+    listAthletes:async()=>[athlete('me',{achievements:['legacy-achievement','total1000lb']})],
   });
+  for (const id of ['achievementFields','mineAchievementFields']) {
+    const fields=[...document.querySelectorAll(`#${id} input`)].map((c)=>c.value);
+    assert.ok(fields.includes('gripper90kg')&&!fields.includes('total1000lb'),'computed achievements have no checkbox');
+  }
   app.openMine();
   document.getElementById('mine-bench').value='20';
   const sent=[];

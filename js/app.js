@@ -552,7 +552,8 @@ class LeaderboardApp {
 
   // --- forms: fields from the registries --------------------------------------
   buildForms() {
-    const checks = (cls) => html`${window.ACHIEVEMENTS.map((a) => html`<label class="form-check"><input type="checkbox" class="${cls}" value="${a.id}"><span><span aria-hidden="true">${a.emoji}</span> ${a.name}</span></label>`)}`;
+    // Computed achievements come from the records, so there is nothing to claim.
+    const checks = (cls) => html`${window.ACHIEVEMENTS.filter((a) => !a.earned).map((a) => html`<label class="form-check"><input type="checkbox" class="${cls}" value="${a.id}"><span><span aria-hidden="true">${a.emoji}</span> ${a.name}</span></label>`)}`;
     document.getElementById('achievementFields').innerHTML = checks('achievement-check');
     document.getElementById('mineAchievementFields').innerHTML = checks('mine-achievement-check');
     document.getElementById('mineLiftFields').innerHTML = this.liftFields('mine');
@@ -716,10 +717,11 @@ class LeaderboardApp {
     // The member's own bodyweight is saved directly, after the requests.
     const bodyweight = this.readBodyweight('mineBodyweight');
     const reweigh = bodyweight !== snap.bodyweight;
-    const checked = [...document.querySelectorAll('.mine-achievement-check')].filter((c) => c.checked).map((c) => c.value);
+    const fields = [...document.querySelectorAll('.mine-achievement-check')];
+    const checked = fields.filter((c) => c.checked).map((c) => c.value);
     for (const id of checked) if (!snap.achievements.includes(id)) proposals.push(['achievement', { achievement_id: id, op: 'add' }]);
     // Only achievements with a form field can be removed from here.
-    for (const id of snap.achievements) if (window.getAchievement(id) && !checked.includes(id)) proposals.push(['achievement', { achievement_id: id, op: 'remove' }]);
+    for (const id of snap.achievements) if (fields.some((c) => c.value === id) && !checked.includes(id)) proposals.push(['achievement', { achievement_id: id, op: 'remove' }]);
 
     if (proposals.length === 0 && !reweigh) { UI.dialogs.close('mineModal'); return UI.toast('No changes', 'success'); }
     for (const [kind, payload] of proposals) {

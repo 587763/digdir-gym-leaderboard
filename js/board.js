@@ -30,7 +30,7 @@ window.BoardView = (() => {
   const HEADINGS = { 'bw-ratio': '× BW', 'bw-reps': 'kg', 'bw-time': 'kg·min', time: 'Time', reps: 'Reps' };
   const scoreHeading = (lift) => lift.id === 'total' ? 'Total (kg)' : HEADINGS[lift.unit] ?? 'PR (kg)';
 
-  const badges = (athlete) => (athlete.achievements || []).map((id) => window.getAchievement(id)).filter(Boolean)
+  const badges = (athlete) => window.ACHIEVEMENTS.filter((a) => window.hasAchievement(athlete, a))
     .map((a) => html`<span class="badge-chip" title="${a.name}">${a.emoji}</span>`);
 
   // Status chips after a name: a pending change, or a PR verified in the last week
@@ -157,7 +157,7 @@ window.BoardView = (() => {
   // Badge cards everywhere; on TV, paged tables when the cards don't fit the screen.
   function hallOfFame(ctx) {
     return html`${window.ACHIEVEMENTS.map((ach) => {
-      const achievers = ctx.athletes.filter((a) => (a.achievements || []).includes(ach.id))
+      const achievers = ctx.athletes.filter((a) => window.hasAchievement(a, ach))
         .sort((a, b) => a.name.localeCompare(b.name));
       const body = achievers.length === 0
         ? html`<div class="empty-achievement"><p>${ach.emptyText}</p></div>`

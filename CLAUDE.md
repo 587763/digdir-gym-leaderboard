@@ -9,7 +9,7 @@ Live: https://587763.github.io/digdir-gym-leaderboard/ · Origin: `587763/digdir
   pinned CDN script with SRI. Node and dev dependencies are only for local tooling/tests.
 - Classic scripts, in order: config → ui → achievements → changelog → lifts → avatar → store →
   history → board → planner → tv → app. Public globals: `LEADERBOARD_CONFIG`, `UI`, `ACHIEVEMENTS`/
-  `getAchievement`, `CHANGELOG`, `EXERCISES`/`Lifts`, `renderAvatar`, `Store`, `HistoryView`,
+  `getAchievement`/`hasAchievement`, `CHANGELOG`, `EXERCISES`/`Lifts`, `renderAvatar`, `Store`, `HistoryView`,
   `BoardView`, `Planner`, `TvDisplay`, `app`.
   Classic scripts keep `?v=` cache-busting coordinated on GitHub Pages (ES modules would need
   a version on every import). A new script needs a tag, the dev-server allowlist and tests.
@@ -28,7 +28,7 @@ Live: https://587763.github.io/digdir-gym-leaderboard/ · Origin: `587763/digdir
 
 ## Files
 - `index.html`: tabs, native `<dialog>` markup, empty board containers (`data-board-group`),
-  a Content-Security-Policy meta tag, the CDN pin and local asset version (`?v=3.3.0`). Bump
+  a Content-Security-Policy meta tag, the CDN pin and local asset version (`?v=3.8.0`). Bump
   every `?v=` together when deploying coordinated JS/CSS changes. No inline styles or scripts:
   the CSP forbids them (the fixture store uses a constructed stylesheet).
 - `styles.css`: one rule set per component in page order, then responsive rules, then TV mode.
@@ -251,6 +251,9 @@ still advances. A PR verified while the board is open gets a celebration banner.
 
 ## Extending
 - Achievement: add to `ACHIEVEMENTS`; forms, badges and Hall of Fame follow automatically.
+  One with `earned(athlete)` is computed from the records (the 🦍 1000 lb Club: a total of at
+  least 1000 lb, 453.6 kg): never claimed or stored, no form checkbox, and it comes and goes
+  with the board. Check achievements with `hasAchievement(athlete, ach)`, never the array.
 - Extra exercise: add to `EXERCISES` with id/label/emoji/unit (`kg`, `reps`, `time`) and group
   `other` or `cardio`. `lowerIsBetter: true` ranks smaller positive values first. Boards, forms,
   history and the Latest feed follow. No schema change for reps/time; a `kg` extra exercise

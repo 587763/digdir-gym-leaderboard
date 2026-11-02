@@ -6,6 +6,13 @@
 // tests/changelog.test.mjs keeps the top entry in step with the app version.
 window.CHANGELOG = [
   {
+    version: '3.8.0',
+    date: '2026-11-02',
+    changes: [
+      '🦍 A new achievement, the 1000 lb Club: squat, bench and deadlift adding up to 1000 lb (453.6 kg). It comes by itself once your total gets there.',
+    ],
+  },
+  {
     version: '3.7.0',
     date: '2026-10-19',
     changes: [
