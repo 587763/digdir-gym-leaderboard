@@ -59,7 +59,8 @@ witnesses it):
 - **Claim your spot** — sign in, then link your GitHub to your athlete (or add a new
   one). An **admin approves** the link.
 - **Your PRs & achievements** need a **peer** to verify them — any other linked member
-  (you can't verify your own). Until verified, the change is pending.
+  (you can't verify your own). Until verified, the change is pending. The 🦍 1000 lb Club
+  needs no claim: it comes with a verified total of 1000 lb (453.6 kg) or more.
 - **Name changes & new athletes** need an **admin**.
 - **Your bodyweight** is optional and yours alone: add, change or clear it in My PRs. It
   applies at once, without review, and clearing it takes you off the bodyweight rankings

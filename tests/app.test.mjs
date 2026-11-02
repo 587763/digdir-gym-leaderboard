@@ -217,8 +217,12 @@ test('editing an athlete preserves unregistered achievements and uses the openin
 test('My PRs never propose removing achievements that have no visible form field', async () => {
   const {app,store,document}=await application({
     getSession:async()=>({user:{id:'user'}}),myProfile:async()=>({status:'active',athlete_id:'me'}),
-    listAthletes:async()=>[athlete('me',{achievements:['legacy-achievement']})],
+    listAthletes:async()=>[athlete('me',{achievements:['legacy-achievement','total1000lb']})],
   });
+  for (const id of ['achievementFields','mineAchievementFields']) {
+    const fields=[...document.querySelectorAll(`#${id} input`)].map((c)=>c.value);
+    assert.ok(fields.includes('gripper90kg')&&!fields.includes('total1000lb'),'computed achievements have no checkbox');
+  }
   app.openMine();
   document.getElementById('mine-bench').value='20';
   const sent=[];
@@ -480,7 +484,7 @@ test('the TV shows the latest verified PRs under every tab, and nothing without 
   await app.refreshAll();
   assert.equal(strip.hidden,true);
 });
-test('the TV latest-PRs line gives way on a tab whose rows would not fit beside it', async () => {
+test('the TV latest-PRs line, then the badges, give way on a tab whose rows would not fit', async () => {
   const pr={id:'pr',athlete_id:'P0',payload:{lift:'bench',value:100,previous_value:90},decided_at:new Date().toISOString()};
   const athletes=Array.from({length:6},(_,i)=>athlete(`P${i}`,{bench:100-i}));
   const {app,context,document}=await application({listAthletes:async()=>athletes,listRecentPrs:async()=>[pr]});
@@ -499,9 +503,14 @@ test('the TV latest-PRs line gives way on a tab whose rows would not fit beside 
   };
   app.tv.fit();
   assert.ok(root.classList.contains('tv-latest-withdrawn'),'a 480px row has 452px beside the line, 502px without it');
+  assert.ok(!root.classList.contains('tv-badges-withdrawn'),'the badges stay when that is enough');
+  rowHeight=520;
+  app.tv.fit();
+  assert.ok(root.classList.contains('tv-latest-withdrawn')&&root.classList.contains('tv-badges-withdrawn'),'then the badges give way too');
   rowHeight=80;
   app.tv.fit();
   assert.ok(!root.classList.contains('tv-latest-withdrawn'),'the line comes back when rows fit');
+  assert.ok(!root.classList.contains('tv-badges-withdrawn'),'and so do the badges');
 });
 test('a TV ranks by bodyweight only when it was turned on', async () => {
   const listAthletes=async()=>[athlete('a',{bench:100,bodyweight:80})];

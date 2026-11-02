@@ -138,7 +138,7 @@ window.TvDisplay = class TvDisplay {
     // The latest-PRs line along the bottom takes its room back on every fit; below, it gives
     // way on this tab if a ranked row could not fit beside it.
     const root = document.documentElement;
-    root.classList.remove('tv-latest-withdrawn');
+    root.classList.remove('tv-latest-withdrawn', 'tv-badges-withdrawn');
     let bottom = frame.getBoundingClientRect().bottom - TvDisplay.PAGE_PAD;
     // Reconsider podiums after fonts, available height or the active tab change.
     for (const liftId of [...frame.querySelectorAll('[data-lift]')].map((s) => s.dataset.lift)) {
@@ -157,18 +157,20 @@ window.TvDisplay = class TvDisplay {
       this.app.renderHallOfFame(true);
     }
     // A ranked row taller than a whole page (a long name wrapping in a narrow column on a small
-    // TV) would run off the screen: the latest-PRs line gives way, as a podium does.
-    const tooTall = [...frame.querySelectorAll('.leaderboard-section tbody')].some((tbody) => {
+    // TV) would run off the screen: the latest-PRs line gives way, as a podium does, and then
+    // the achievement badges after the names (the Hall of Fame still shows them).
+    const tooTall = () => [...frame.querySelectorAll('.leaderboard-section tbody')].some((tbody) => {
       if (tbody.querySelector('.empty-state')) return false;
       const rows = [...tbody.querySelectorAll('tr')];
       rows.forEach((tr) => { tr.hidden = false; });
       const room = bottom - tbody.getBoundingClientRect().top;
       return rows.some((tr) => tr.getBoundingClientRect().height > room);
     });
-    if (tooTall && !document.getElementById('tvLatest').hidden) {
+    if (tooTall() && !document.getElementById('tvLatest').hidden) {
       root.classList.add('tv-latest-withdrawn');
       bottom = frame.getBoundingClientRect().bottom - TvDisplay.PAGE_PAD;
     }
+    if (tooTall()) root.classList.add('tv-badges-withdrawn');
     this.boards = [];
     let pages = 1;
     frame.querySelectorAll('.leaderboard-section').forEach((section) => {
