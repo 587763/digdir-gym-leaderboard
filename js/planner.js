@@ -14,7 +14,7 @@
 //   loading, error, signedIn, canSee (members on the board and admins, as in SQL can_plan()),
 //   canPlan, isAdmin, me: user id, member(userId) → { name, athlete } }
 window.Planner = (() => {
-  const { html } = UI;
+  const { html, icon, LOCALE } = UI;
   const ROTATION = { start: '2026-10-16', order: ['squat', 'bench', 'deadlift', 'other'] };
   const OPEN_MS = 2 * 3600000; // joinable until two hours after the start (matching SQL)
   const ARRIVAL_MS = 6 * 3600000; // joiners come within six hours of the start (matching SQL)
@@ -22,8 +22,6 @@ window.Planner = (() => {
   const WEEKS = 9;             // the planner shows this week and the eight after it
   const ACTIVITY_MAX = 60;
   const NOTE_MAX = 200;
-  const LOCALE = 'en-GB';
-  const icon = (emoji) => html`<span aria-hidden="true">${emoji}</span>`;
   const avatar = (person, size = 30) => UI.raw(window.renderAvatar(person.athlete || { name: person.name }, size, { decorative: true }));
 
   // --- calendar days ---------------------------------------------------------
@@ -87,8 +85,12 @@ window.Planner = (() => {
   const planEmoji = (plan) => plan.emoji ?? activityEmoji(plan.activity);
   const joiners = (plan) => [...(plan.plan_joins || [])].sort((a, b) => String(a.created_at).localeCompare(String(b.created_at)))
     .map((j) => j.user_id);
-  // The last day a plan may start on (partly: plans reach AHEAD_DAYS from this moment).
-  const lastDay = (now) => addDays(now, AHEAD_DAYS);
+  // The last day a plan may start on (partly: plans reach AHEAD_DAYS from this moment), kept
+  // within the weeks the planner loads and shows, so a saved plan never lands out of sight.
+  const lastDay = (now) => {
+    const reach = addDays(now, AHEAD_DAYS), shown = addDays(weekStart(now, WEEKS), -1);
+    return reach < shown ? reach : shown;
+  };
   // Who comes when, earliest first: the host (none on a Friday's lift) at the start, everyone
   // who joined at their own time.
   const arrivals = (plan) => [...(plan.owner ? [{ user_id: plan.owner, at: Date.parse(plan.starts_at), host: true }] : []),
@@ -102,25 +104,38 @@ window.Planner = (() => {
   const nextPlan = (plans, now = new Date()) => [...(plans || [])].filter((p) => isOpen(p, now.getTime())).sort(byEarliest)[0] ?? null;
 
   // "Squat" and "bench day" find their exercise's emoji; anything else gets a flexed arm.
+  // Exercises and groups match as whole words ("Benchmark" is no bench, "Another" no other
+  // lifts); a few general words match from their start, so "running" finds the runner but
+  // "crunches" does not.
+  const STEMS = [['🏃', 'run'], ['🏃', 'jog'], ['🚴', 'bike'], ['🚴', 'cycl'], ['🧘', 'stretch'], ['🧘', 'mobility'],
+    ['🧗', 'pull-up'], ['🧗', 'pullup'], ['🧗', 'chin-up'], ['💪', 'push-up']];
   function activityEmoji(text) {
-    const words = String(text).toLocaleLowerCase();
-    const known = [...Lifts.all.map((e) => [e.emoji, e.label, e.id]), ...Lifts.groups.map((g) => [g.emoji, g.label, g.id]),
-      ['🏃', 'run'], ['🏃', 'jog'], ['🚴', 'bike'], ['🚴', 'cycl'], ['🧘', 'stretch'], ['🧘', 'mobility']];
-    return known.find(([, ...names]) => names.some((name) => words.includes(name.toLocaleLowerCase())))?.[0] || '💪';
+    // Words in lower case with a space around each, so " bench " finds the whole word only.
+    const spaced = (value) => ` ${String(value).toLocaleLowerCase().replace(/[^\p{L}\p{N}-]+/gu, ' ').trim()} `;
+    const words = spaced(text);
+    const named = [...Lifts.all.flatMap((e) => [[e.emoji, e.label], [e.emoji, e.id]]), ...Lifts.groups.map((g) => [g.emoji, g.label])];
+    return named.find(([, name]) => words.includes(spaced(name)))?.[0]
+      ?? STEMS.find(([, stem]) => words.includes(` ${stem}`))?.[0] ?? '💪';
   }
   // Suggestions for the activity field: the Friday lifts, every exercise, then a few general ones.
   const suggestions = () => [...new Set([...ROTATION.order.map((id) => focus(id).label), ...Lifts.all.map((e) => e.label),
     'Upper body', 'Lower body', 'Full body', 'Cardio', 'Mobility'])];
 
+  // A time field's "16:30" on a calendar day → that moment, or an Error saying what to fix.
+  function clockOn(day, time) {
+    const clock = String(time || '').match(/^(\d{2}):(\d{2})/);
+    if (!clock || Number(clock[1]) > 23 || Number(clock[2]) > 59) throw new Error('Pick a time, like 16:30.');
+    return new Date(day.getFullYear(), day.getMonth(), day.getDate(), Number(clock[1]), Number(clock[2]));
+  }
   // Form fields → { startsAt (ISO), activity, note }, or an Error saying what to fix.
   function readPlan({ date, time, activity, note }, now = new Date()) {
     const day = /^\d{4}-\d{2}-\d{2}$/.test(date || '') ? fromKey(date) : null;
-    const clock = String(time || '').match(/^(\d{2}):(\d{2})/);
     if (!day || dayKey(day) !== date) throw new Error('Pick a day.');
-    if (!clock || Number(clock[1]) > 23 || Number(clock[2]) > 59) throw new Error('Pick a time, like 16:30.');
-    const start = new Date(day.getFullYear(), day.getMonth(), day.getDate(), Number(clock[1]), Number(clock[2]));
+    const start = clockOn(day, time);
     if (start.getTime() < now.getTime() - OPEN_MS) throw new Error('That time has passed. Pick a time from now on.');
-    if (start.getTime() > now.getTime() + AHEAD_DAYS * 86400000) throw new Error(`Plans reach at most ${AHEAD_DAYS} days ahead.`);
+    if (day > lastDay(now)) throw new Error(`Plans reach at most ${AHEAD_DAYS} days ahead: pick a day up to ${formatDay(lastDay(now))}.`);
+    // The limit is to the minute, so on the last day only times up to now's fit.
+    if (start.getTime() > now.getTime() + AHEAD_DAYS * 86400000) throw new Error(`Plans reach at most ${AHEAD_DAYS} days ahead: pick an earlier time that day.`);
     const what = String(activity || '').trim();
     if (!what || what.length > ACTIVITY_MAX) throw new Error(`Say what you'll do, in 1 to ${ACTIVITY_MAX} characters.`);
     const remark = String(note || '').trim();
@@ -130,10 +145,8 @@ window.Planner = (() => {
   // The join form's time → an instant on the session's day, or an Error saying what to fix. A
   // planned session takes times within six hours of its start; a Friday's lift any time that day.
   function readArrival(plan, time) {
-    const clock = String(time || '').match(/^(\d{2}):(\d{2})/);
-    if (!clock || Number(clock[1]) > 23 || Number(clock[2]) > 59) throw new Error('Pick a time, like 16:30.');
     const start = new Date(plan.starts_at);
-    const at = new Date(start.getFullYear(), start.getMonth(), start.getDate(), Number(clock[1]), Number(clock[2]));
+    const at = clockOn(start, time);
     if (!plan.friday && Math.abs(at - start) > ARRIVAL_MS) throw new Error('Pick a time within six hours of the session\'s start.');
     return at.toISOString();
   }
@@ -178,7 +191,7 @@ window.Planner = (() => {
     const friday = shown ? fridayPlan(next.date, fridayJoins) : null;
     const fridayGoing = friday ? joiners(friday).length : 0;
     const myFriday = friday && arrivalOf(friday, me);
-    return { now, next, shown, friday, plan: shown ? plan : null, first: shown && !!plan && earliest(plan) < next.date.getTime(),
+    return { now, next, friday, plan: shown ? plan : null, first: shown && !!plan && earliest(plan) < next.date.getTime(),
       who: plan && (plan.owner === me ? 'Your session' : `with ${member(plan.owner).name}`),
       count: going ? `🙋 ${going} in` : 'no one in yet',
       // "✓ In at 13:30 · 🙋 2 in", "from 13:00 · 🙋 2 in", or "🙋 Join" before anyone has.
@@ -203,7 +216,7 @@ window.Planner = (() => {
       : html`<div class="next-lift-main">
           <h2 class="next-lift-eyebrow" id="nextLiftTitle">Friday lift · <span class="next-lift-when">${whenLabel(next.daysAway, next.date)}</span></h2>
           <p class="next-lift-name">${icon(next.focus.emoji)} ${next.focus.label}</p>
-          ${fridaySession && isOpen(fridaySession, now.getTime()) && html`<button type="button" class="next-friday-who" data-action="open-planner" data-id="${fridaySession.id}" aria-label="Friday lift: ${fridayWho}. See who comes when">${fridayWho}</button>`}
+          ${fridaySession && html`<button type="button" class="next-friday-who" data-action="open-planner" data-id="${fridaySession.id}" aria-label="Friday lift: ${fridayWho}. See who comes when">${fridayWho}</button>`}
         </div>`;
     return html`${first ? html`${session()}${friday}` : html`${friday}${session()}`}
       <button type="button" class="btn btn-secondary btn-small" data-action="open-planner">📅 Planner</button>`;
@@ -211,14 +224,15 @@ window.Planner = (() => {
 
   // Marks for the boards: the board of this Friday's lift gets a sticker (BoardView), and
   // when it is other lifts, their tab gets one line instead of a sticker on every board.
+  const markLabel = (next) => next.daysAway === 0 ? 'Today\'s lift' : 'Friday lift';
   function fridayBoard(now = new Date()) {
     const next = nextFriday(now);
-    return { id: next.focus.id, label: next.daysAway === 0 ? 'Today\'s lift' : 'Friday lift', title: `The Friday lift, ${formatDay(next.date)}` };
+    return { id: next.focus.id, label: markLabel(next), title: `The Friday lift, ${formatDay(next.date)}` };
   }
   function otherCallout(now = new Date()) {
     const next = nextFriday(now);
     if (next.focus.id !== 'other') return '';
-    return html`<span class="friday-tag">📅 ${next.daysAway === 0 ? 'Today\'s lift' : 'Friday lift'}</span> ${next.daysAway === 0 ? 'Pick any of these today.' : `Pick any of these on ${formatDay(next.date)}.`}`;
+    return html`<span class="friday-tag">📅 ${markLabel(next)}</span> ${next.daysAway === 0 ? 'Pick any of these today.' : `Pick any of these on ${formatDay(next.date)}.`}`;
   }
 
   // The same in one line for the TV header: no controls, readable across the room. A TV that
@@ -333,11 +347,13 @@ window.Planner = (() => {
         ${canAdd && html`<button type="button" class="planner-add" data-action="plan-add" data-id="${key}" aria-label="Plan a session on ${label}">+ Add</button>`}
       </li>`;
     };
+    // The week buttons are aria-disabled at either end, not disabled: a disabled button drops
+    // keyboard focus, and stepping onto the last week would leave it nowhere.
     return html`<div class="planner-head">
         <div class="planner-nav">
-          <button type="button" class="btn btn-ghost planner-step" data-action="planner-week" data-id="-1" aria-label="Previous week"${ctx.week <= 0 && UI.raw(' disabled')}>‹</button>
+          <button type="button" class="btn btn-ghost planner-step" data-action="planner-week" data-id="-1" aria-label="Previous week"${ctx.week <= 0 && UI.raw(' aria-disabled="true"')}>‹</button>
           <h3 class="planner-title">${title.name} <span class="planner-span">${title.span}</span></h3>
-          <button type="button" class="btn btn-ghost planner-step" data-action="planner-week" data-id="1" aria-label="Next week"${ctx.week >= WEEKS - 1 && UI.raw(' disabled')}>›</button>
+          <button type="button" class="btn btn-ghost planner-step" data-action="planner-week" data-id="1" aria-label="Next week"${ctx.week >= WEEKS - 1 && UI.raw(' aria-disabled="true"')}>›</button>
         </div>
         ${ctx.canPlan && html`<button type="button" class="btn btn-primary" data-action="plan-add">+ Plan a session</button>`}
       </div>

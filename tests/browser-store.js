@@ -27,6 +27,8 @@
     {user_id:'peer',github_login:'daniel-lifts',is_admin:false,status:'active',athlete_id:'athlete-1'},
     {user_id:'newbie',github_login:'new-member',is_admin:false,status:'pending',athlete_id:null},
     {user_id:'banned',github_login:'blocked-member',is_admin:false,status:'blocked',athlete_id:null},
+    // An account that did not sign in with GitHub: no login anyone can vouch for.
+    {user_id:'0f3a9c1e-stranger',github_login:null,is_admin:false,status:'pending',athlete_id:null},
   ];
   let proposals = [
     {id:'proposal-1',kind:'pr',approval:'peer',athlete_id:'athlete-1',proposer:'peer',status:'pending',created_at:ago(2),payload:{lift:'bench',value:145,previous_value:139}},
@@ -87,9 +89,20 @@
     joinPlan:async(id,joining,arrives_at)=>{const plan=plans.find((p)=>p.id===id); plan.plan_joins=plan.plan_joins.filter((j)=>j.user_id!==me.user_id);
       if(joining) plan.plan_joins.push({user_id:me.user_id,arrives_at:arrives_at??plan.starts_at,created_at:new Date().toISOString()});},
     subscribe:(_cb,status)=>status('SUBSCRIBED'), onAuthChange(){},
-    signIn:async()=>{},signOut:async()=>{},
-    propose:async(kind,id,payload)=>{proposals.push({id:crypto.randomUUID(),kind,athlete_id:id,payload,proposer:'admin',approval:['pr','achievement'].includes(kind)?'peer':'admin',status:'pending',created_at:new Date().toISOString()});},
-    decide:async(id)=>{proposals=proposals.filter((p)=>p.id!==id);},
+    signIn:async()=>{},signOut:async()=>{},takeReturnView:()=>'',
+    propose:async(kind,id,payload)=>{
+      const previous_value=kind==='pr'?(athletes.find((a)=>a.id===id)?.[payload.lift]??athletes.find((a)=>a.id===id)?.lifts?.[payload.lift]??0):undefined;
+      proposals.push({id:crypto.randomUUID(),kind,athlete_id:id,payload:kind==='pr'?{...payload,previous_value}:payload,proposer:me.user_id,
+        approval:['pr','achievement'].includes(kind)?'peer':'admin',status:'pending',created_at:new Date().toISOString()});},
+    // Approving a PR changes the board and joins the verified history, as the database does.
+    decide:async(id,approve)=>{
+      const request=proposals.find((p)=>p.id===id);
+      proposals=proposals.filter((p)=>p.id!==id);
+      const athlete=athletes.find((a)=>a.id===request?.athlete_id);
+      if(!approve||request?.kind!=='pr'||!athlete) return;
+      const {lift,value}=request.payload;
+      if(lift in athlete) athlete[lift]=value; else athlete.lifts={...athlete.lifts,[lift]:value};
+      history.push({id:request.id,athlete_id:athlete.id,payload:request.payload,decided_at:new Date().toISOString()});},
     withdraw:async(id)=>{proposals=proposals.filter((p)=>p.id!==id);},
     restoreMyAthlete:async()=>{const a=athletes.find((x)=>x.id===me.athlete_id); if(a) a.archived_at=null;},
     setMyBodyweight:async(kg)=>{athletes.find((x)=>x.id===me.athlete_id).bodyweight=kg;},

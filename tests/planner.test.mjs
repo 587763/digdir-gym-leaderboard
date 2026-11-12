@@ -52,6 +52,21 @@ test('plan forms are read like the database checks them', () => {
   assert.ok(read({ date: '2026-10-19', time: '10:30' }));
   assert.throws(() => read({ date: '2026-10-19', time: '09:59' }), /has passed/);
   assert.throws(() => read({ date: '2026-12-19', time: '12:01' }), /60 days/);
+  // Late in the week 60 days reach past the weeks the planner loads and shows; a plan stops
+  // at the last of those, so it never lands out of sight.
+  const thursday = day('2026-11-12', 10);
+  assert.equal(Planner.dayKey(Planner.lastDay(thursday)), '2027-01-10', 'the Sunday of the last week shown, not 11 January');
+  assert.equal(Planner.dayKey(Planner.lastDay(day('2026-11-11', 10))), '2027-01-10', 'earlier in the week it is the 60 days');
+  assert.equal(Planner.dayKey(Planner.lastDay(day('2026-11-09', 10))), '2027-01-08');
+  const late = (date) => Planner.readPlan({ date, time: '09:00', activity: 'Squat', note: '' }, thursday);
+  assert.equal(Planner.weekOf(new Date(late('2027-01-10').startsAt), thursday), Planner.WEEKS - 1);
+  assert.ok(late('2027-01-10').startsAt < Planner.range(thursday).to, 'and it is among the plans loaded');
+  assert.throws(() => late('2027-01-11'), /60 days ahead: pick a day up to Sun 10 Jan/);
+  // On the last day itself the limit is to the minute, and the message says so instead of naming that day.
+  const monday = day('2026-11-09', 14);
+  const lastDayAt = (time) => Planner.readPlan({ date: '2027-01-08', time, activity: 'Squat', note: '' }, monday);
+  assert.ok(lastDayAt('13:00'));
+  assert.throws(() => lastDayAt('15:00'), /60 days ahead: pick an earlier time that day/);
   assert.throws(() => read({ date: '2026-02-31' }), /Pick a day/);
   assert.throws(() => read({ time: '' }), /Pick a time/);
   assert.throws(() => read({ time: '24:00' }), /Pick a time/);
@@ -141,6 +156,9 @@ test('each Friday\'s lift is a session with no host that members join at their o
 test('activities get the emoji of the exercise they name', () => {
   assert.deepEqual(['Squat', 'heavy bench day', 'Deadlift', 'Dead hang', 'Other lifts', 'Run 5 km', 'Yoga'].map(Planner.activityEmoji),
     ['🦵', '🏋️', '💀', '🐒', '🤸', '🏃', '💪']);
+  // Whole words only: no runner for crunches, no barbell for a benchmark, no other lifts for "another".
+  assert.deepEqual(['Crunches', 'Brunch then gym', 'Benchmark test', 'Maintenance', 'Another round'].map(Planner.activityEmoji), Array(5).fill('💪'));
+  assert.deepEqual(['running', 'Pull-ups', 'Chin-ups', 'squat/bench'].map(Planner.activityEmoji), ['🏃', '🧗', '🧗', '🦵']);
   assert.ok(Planner.suggestions().includes('Other lifts') && Planner.suggestions().includes('Strict Curl'));
 });
 
@@ -251,7 +269,10 @@ test('visitors and members awaiting a spot see the Fridays but no plans', () => 
   const failed = render(Planner.week(ctx({ plans, error: true })));
   assert.equal(failed.querySelectorAll('.plan-card').length, 0);
   assert.match(failed.querySelector('.planner-notice.warning').textContent, /could not load/);
-  // The week buttons stop at this week and at the last week the planner loads.
-  assert.equal(render(Planner.week(ctx())).querySelector('[data-action="planner-week"][data-id="-1"]').hasAttribute('disabled'), true);
-  assert.equal(render(Planner.week(ctx({ week: Planner.WEEKS - 1 }))).querySelector('[data-action="planner-week"][data-id="1"]').hasAttribute('disabled'), true);
+  // The week buttons stop at this week and at the last week the planner loads. They stay
+  // focusable there (aria-disabled): a disabled button would drop keyboard focus to the page.
+  const step = (week, by) => render(Planner.week(ctx({ week }))).querySelector(`[data-action="planner-week"][data-id="${by}"]`);
+  assert.equal(step(0, -1).getAttribute('aria-disabled'), 'true');
+  assert.equal(step(Planner.WEEKS - 1, 1).getAttribute('aria-disabled'), 'true');
+  assert.equal(step(0, 1).hasAttribute('aria-disabled') || step(0, -1).hasAttribute('disabled'), false);
 });

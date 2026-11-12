@@ -36,12 +36,14 @@ achievements. Hand-drawn whiteboard look; the board updates live across everyone
   see the plans, since they tell when someone will be at the gym.
 - **✨ What's new** (above the tabs) lists what changed in each release, with a dot until
   you've seen the latest one.
-- Tab links can be shared: add `#total`, `#cardio`, `#latest` and so on to the URL.
+- Tab links can be shared: add `#total`, `#cardio`, `#latest` and so on to the URL. Signing in
+  brings you back to the view you started from.
 - **Putting it on a TV?** Open the board with `?tv` (e.g. the live URL + `?tv`), or hit
   the **📺 TV mode** button. You get a full-screen landscape layout that auto-cycles
   through the tabs hands-free — and pauses while the browser tab is off-screen, so it
   plays nicely with a screen that rotates between several pages. A big roster is paged
-  through automatically, and the latest PRs run along the bottom on every tab. Add `&rotate=20` to change the target seconds per tab (default
+  through automatically (a board's podium shows on its first page, and the pages after it
+  use that room for more names), and the latest PRs run along the bottom on every tab. Add `&rotate=20` to change the target seconds per tab (default
   15), and `&tabs=lifts,total,latest` to show only some tabs. The TV never ranks by
   bodyweight unless you ask for it: add `&bodyweight`, or turn it on in that browser before
   starting TV mode. Large rosters extend that time so every page gets at least five seconds to read;
@@ -79,7 +81,8 @@ witnesses it):
   and you'll be offered to bring your athlete back; athletes without a linked account can
   be claimed again. Permanent deletion is still there for data-removal requests.
 - Blocked accounts cannot submit or approve changes. Requests are validated, repeated
-  submissions are deduplicated, and stale PR requests cannot overwrite newer records.
+  submissions are deduplicated, an account keeps at most 30 requests waiting, and stale PR
+  requests cannot overwrite newer records.
   Admin forms also detect concurrent edits instead of overwriting someone else’s changes.
 
 ## How it works
@@ -126,13 +129,10 @@ keypad) or whole seconds; the form shows how a time will be read before you subm
 Keyboard users can move between tabs with arrow keys and close dialogs with Escape.
 Equal decimal totals share the same rank. TV rotation pauses while a dialog is open.
 
-The [repository review](REVIEW.md) records what the September 2026 reviews changed, how it
-was verified, and the remaining follow-ups.
-
 For an existing database, apply the numbered files in
 [`supabase/migrations/`](supabase/migrations/) in order (the Supabase SQL Editor, or
 `supabase db query --linked -f <file>`) before deploying the frontend that needs them (the
-live database has everything through `0011_friday_joins.sql`). They preserve existing data. For a
+live database has everything through `0012_hardening.sql`). They preserve existing data. For a
 fresh installation, use `supabase/schema.sql` instead; that file resets the tables.
 
 ## Backups
@@ -141,7 +141,9 @@ The Supabase project is on the free tier, which has no reliable automatic backup
 idle free projects can be paused or deleted). A scheduled GitHub Actions workflow
 ([`.github/workflows/backup.yml`](.github/workflows/backup.yml)) dumps the data daily and
 keeps each dump as a **workflow artifact for 90 days**; dumps are never committed to this
-public repo.
+public repo. Artifacts of a public repository can be downloaded by any signed-in GitHub user,
+so the dumps hold only what a signed-in account can already read (athletes, members and
+requests), and the planner's tables are left out.
 
 GitHub pauses scheduled workflows in repositories without commits for 60 days (the backups
 stopped this way on 30 August 2026). Each backup run now re-enables its own schedule; if it

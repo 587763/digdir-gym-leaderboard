@@ -16,6 +16,36 @@ window.UI = (() => {
   // Every interpolation is escaped unless it is itself html`` / raw(); arrays are joined,
   // and null, undefined and false render nothing (so `${cond && html`…`}` works).
   const html = (strings, ...values) => new SafeHtml(strings.reduce((out, s, i) => out + fragment(values[i - 1]) + s));
+  // A decorative emoji: screen readers skip it, the text next to it says the same.
+  const icon = (emoji) => html`<span aria-hidden="true">${emoji}</span>`;
+
+  // Writes markup only when it differs from what was last written there, so a redraw that
+  // changes nothing keeps focus, an open <select> or <details> and the scroll position.
+  // `force` rewrites anyway (to undo what the visitor changed in a control).
+  const written = new WeakMap();
+  function setHtml(el, markup, { force = false } = {}) {
+    const next = String(markup);
+    if (!force && written.get(el) === next) return false;
+    written.set(el, next);
+    el.innerHTML = next;
+    return true;
+  }
+
+  // --- preferences -------------------------------------------------------------
+  // Per-browser choices (TV mode, bodyweight ranking, the changelog seen). Storage may be
+  // disabled (private mode): then reads give null and writes are dropped.
+  const stored = {
+    get(key) { try { return localStorage.getItem(key); } catch { return null; } },
+    set(key, value) { try { localStorage.setItem(key, value); } catch { /* not remembered */ } },
+  };
+  // ?name turns a display mode on; ?name=0 leaves it off.
+  const hasParam = (name, params = new URLSearchParams(location.search)) => params.has(name) && params.get(name) !== '0';
+  // Keeps the URL honest about a display mode, so a reload or a shared link matches the screen.
+  function setParam(name, on) {
+    const url = new URL(location.href);
+    if (on) url.searchParams.set(name, '1'); else url.searchParams.delete(name);
+    history.replaceState(null, '', url);
+  }
 
   // --- dates -----------------------------------------------------------------
   // The interface is English; dates read day-month-year as they do in the office.
@@ -28,7 +58,10 @@ window.UI = (() => {
     const seconds = (Date.parse(iso) - now) / 1000;
     if (!Number.isFinite(seconds)) return '';
     if (Math.abs(seconds) < 60) return 'just now';
-    const [unit, size] = UNITS.find(([, s]) => Math.abs(seconds) >= s);
+    let i = UNITS.findIndex(([, size]) => Math.abs(seconds) >= size);
+    // Rounding can fill the next unit: 59.6 minutes is an hour, not "60 minutes ago".
+    if (i > 0 && Math.abs(Math.round(seconds / UNITS[i][1])) * UNITS[i][1] >= UNITS[i - 1][1]) i--;
+    const [unit, size] = UNITS[i];
     return new Intl.RelativeTimeFormat(LOCALE, { numeric: 'auto' }).format(Math.round(seconds / size), unit);
   }
 
@@ -114,7 +147,9 @@ window.UI = (() => {
     if (current === dialog) return dialog;
     if (current) { current.close(); } else { trigger = document.activeElement; triggerScope = scopeOf(trigger); }
     dialog.showModal();
-    (dialog.querySelector('[autofocus]') || dialog).focus();
+    (dialog.querySelector('[autofocus]') || dialog).focus({ preventScroll: true });
+    // Focusing a card taller than the screen scrolls it part-way; always start at its title.
+    dialog.scrollTop = 0;
     if (!current) listeners.forEach((fn) => fn(true));
     return dialog;
   }
@@ -140,7 +175,7 @@ window.UI = (() => {
   }
 
   return {
-    escapeHtml, html, raw, SafeHtml, toast, keepFocus, formatDate, timeAgo,
+    LOCALE, escapeHtml, html, raw, icon, setHtml, stored, hasParam, setParam, toast, keepFocus, formatDate, timeAgo,
     dialogs: { setup, open, close, closeAll, isOpen, anyOpen: () => !!openDialog(), onChange: (fn) => listeners.add(fn) },
   };
 })();

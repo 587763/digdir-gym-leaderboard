@@ -6,6 +6,21 @@
 // tests/changelog.test.mjs keeps the top entry in step with the app version.
 window.CHANGELOG = [
   {
+    version: '3.8.1',
+    date: '2026-11-12',
+    changes: [
+      '📺 The TV shows a podium on a board\'s first page only. The pages after it fit more names, so every tab comes round sooner.',
+      '🔥 marks every record of the past week, not only the newest dozen.',
+      'Keyboard focus stays where you were after approving, archiving or saving, and open lists are not redrawn under you.',
+      'The review list offers Approve only where it can work, and says why otherwise.',
+      'Signing in brings you back to the view you started from, such as TV mode or a tab.',
+      'Long dialogs open at their title on a phone, instead of part-way down.',
+      'On a shared podium step, only your own name gets the highlighter.',
+      'The planner no longer takes a plan further ahead than the weeks it shows.',
+      'Times read more naturally: "1 hour ago" instead of "60 minutes ago".',
+    ],
+  },
+  {
     version: '3.8.0',
     date: '2026-11-02',
     changes: [

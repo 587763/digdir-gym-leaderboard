@@ -1,7 +1,7 @@
 // Layout checks in real Chrome against the local fixtures: no horizontal overflow,
 // scores stay inside their boards, table text stays inside its cells, the selected
 // tab is visible, TV mode never scrolls and every ranked row is
-// reachable on some page, dialogs open cleanly, and the console stays quiet.
+// reachable on some page, dialogs open cleanly at their title, and the console stays quiet.
 // Zero dependencies: drives Chrome over the DevTools protocol with Node's WebSocket.
 //
 //   npm run test:browser            (CHROME=/path/to/chrome to override detection)
@@ -114,6 +114,8 @@ const CHECK_DIALOG = `(() => {
   if (!dialog) return ['dialog did not open'];
   const card = dialog.querySelector('.modal-content');
   const problems = card.scrollWidth > card.clientWidth + 1 ? ['dialog content scrolls horizontally: ' + dialog.id] : [];
+  // A card taller than the screen still opens at its title and close button.
+  if (dialog.scrollTop > 0) problems.push('dialog opens scrolled past its title: ' + dialog.id);
   // Planned sessions stay inside their day.
   const box = (el) => el.getBoundingClientRect();
   for (const el of dialog.querySelectorAll('.plan-card, .plan-card > *, .friday-chip, .planner-add')) {

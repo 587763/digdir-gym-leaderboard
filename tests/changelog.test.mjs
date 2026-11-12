@@ -12,6 +12,8 @@ test('the newest changelog entry is the version being deployed', () => {
   const assets = [...read('index.html').matchAll(/\?v=([\d.]+)"/g)].map((m) => m[1]);
   assert.ok(assets.length > 0);
   assert.deepEqual([...new Set(assets)], [version], 'every ?v= in index.html carries the package version');
+  const lock = JSON.parse(read('package-lock.json'));
+  assert.deepEqual([lock.version, lock.packages[''].version], [version, version], 'package-lock.json carries it too');
 });
 
 test('changelog releases are newest first, dated and described in short lines', () => {

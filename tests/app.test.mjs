@@ -137,6 +137,22 @@ test('TV paging accounts for wrapped rows and keeps every row reachable', async 
   assert.deepEqual(rows.map((r)=>r.hidden),[true,true,false,false]);
   assert.equal(app.tv.advancePage(),false);
 });
+test('a TV podium shows on the first page only, and later pages use its room for rows', async () => {
+  const {app}=await application();
+  const rows=Array.from({length:7},()=>({getBoundingClientRect:()=>({height:50})}));
+  // 110px beside the podium, 260px without it: two rows, then five.
+  const pages=app.tv.partitionRows(rows,110,260);
+  assert.deepEqual(Array.from(pages,(page)=>page.length),[2,5]);
+  const podium={hidden:false}, other={hidden:false};
+  app.tv.enabled=true;app.tv.page=0;app.tv.pages=2;
+  // A board that fits on one page pins to it, podium and all.
+  app.tv.boards=[{rows,slices:pages,podium},{rows:[],slices:[[]],podium:other}];
+  app.tv.applyPage();
+  assert.deepEqual([podium.hidden,other.hidden],[false,false]);
+  app.tv.advancePage();
+  assert.deepEqual([podium.hidden,other.hidden],[true,false]);
+  assert.deepEqual(rows.map((r)=>r.hidden),[true,true,false,false,false,false,false]);
+});
 test('large TV rosters get readable dwell times, while a single page respects the configured duration', async () => {
   const {app} = await application();
   const {tv}=app;
@@ -332,6 +348,19 @@ test('admins cannot demote or block themselves, and failed member edits show the
   assert.notEqual(control('admin','peer'),toggled,'the list is redrawn from saved data');
   assert.equal(control('admin','peer').hasAttribute('checked'),false);
 });
+test('the members list flags an account that did not sign in with GitHub', async () => {
+  const {app,document}=await application({
+    getSession:async()=>({user:{id:'boss'}}),myProfile:async()=>({user_id:'boss',is_admin:true,status:'active'}),
+    listProfiles:async()=>[{user_id:'boss',github_login:'boss',is_admin:true,status:'active'},
+      {user_id:'0f3a9c1e-0000-4000-8000-000000000001',github_login:null,is_admin:false,status:'pending'}],
+  });
+  app.openMembers();
+  const rows=[...document.querySelectorAll('#usersList .user-row')];
+  const stranger=rows.find((row)=>row.querySelector('.tag-warn'));
+  assert.match(stranger.querySelector('.user-info').textContent,/account 0f3a9c1e[\s\S]*no GitHub login[\s\S]*pending/);
+  assert.equal(stranger.querySelector('select').getAttribute('aria-label'),'Linked athlete for account 0f3a9c1e');
+  assert.equal(rows.filter((row)=>row.querySelector('.tag-warn')).length,1,'GitHub members carry no warning');
+});
 test('the latest feed lists verified improvements and cheers PRs verified while watching', async () => {
   const now=Date.now();
   const pr=(id,lift,value,previous,minutesAgo)=>({id,athlete_id:'a',payload:{lift,value,previous_value:previous},decided_at:new Date(now-minutesAgo*60000).toISOString()});
@@ -511,6 +540,30 @@ test('the TV latest-PRs line, then the badges, give way on a tab whose rows woul
   app.tv.fit();
   assert.ok(!root.classList.contains('tv-latest-withdrawn'),'the line comes back when rows fit');
   assert.ok(!root.classList.contains('tv-badges-withdrawn'),'and so do the badges');
+});
+test('TV fitting measures the room beside a podium and without it', async () => {
+  const athletes=Array.from({length:12},(_,i)=>athlete(`P${i}`,{bench:100-i}));
+  const {app,context,document}=await application({listAthletes:async()=>athletes});
+  context.innerHeight=1080;
+  app.tv.enabled=true; app.tv.restart=()=>{};
+  document.querySelector('.tab-content.active').getBoundingClientRect=()=>({bottom:748}); // 700px above the page dots
+  const renderBoard=app.renderBoard.bind(app);
+  app.renderBoard=(lift,podiumFits)=>{
+    const section=renderBoard(lift,podiumFits);
+    const podium=section.querySelector('.podium-container');
+    // The rows start 400px down beside the podium and 100px down once it is hidden.
+    section.querySelector('tbody').getBoundingClientRect=()=>({top:podium&&!podium.hidden?400:100});
+    section.querySelectorAll('tbody tr').forEach((row)=>{row.getBoundingClientRect=()=>({height:100});});
+    return section;
+  };
+  app.tv.fit();
+  const [board]=app.tv.boards;
+  assert.deepEqual(Array.from(board.slices,(slice)=>slice.length),[3,6],'nine ranked rows: three beside the podium, six after it');
+  assert.equal(app.tv.pages,2);
+  assert.equal(document.querySelector('[data-lift="bench"] .podium-container').hidden,false);
+  app.tv.advancePage();
+  assert.equal(document.querySelector('[data-lift="bench"] .podium-container').hidden,true);
+  assert.equal([...document.querySelectorAll('#benchTable tbody tr')].filter((row)=>!row.hidden).length,6);
 });
 test('a TV ranks by bodyweight only when it was turned on', async () => {
   const listAthletes=async()=>[athlete('a',{bench:100,bodyweight:80})];
@@ -721,3 +774,134 @@ test('members join sessions at their own time, change it or leave, plan their ow
   assert.deepEqual(calls.at(-1),['delete','p1']);
   assert.equal(app.plans.length,0);
 });
+test('dialogs open at their title, and a refresh leaves the sign-out button alone', async () => {
+  const {app,store,document}=await application({
+    getSession:async()=>({user:{id:'me'}}),myProfile:async()=>({user_id:'me',status:'active',athlete_id:'A'}),
+    listAthletes:async()=>[athlete('A',{bench:100})],
+  });
+  // A dialog taller than the screen kept the scroll position its focused card was given.
+  const dialog=document.getElementById('mineModal');
+  dialog.scrollTop=75;
+  app.openMine();
+  assert.equal(dialog.open,true);
+  assert.equal(dialog.scrollTop,0);
+  // The header's buttons are rewritten only when they change, so they keep keyboard focus.
+  const signOut=document.getElementById('signOutBtn');
+  store.listAthletes=async()=>[athlete('A',{bench:105})];
+  await app.refreshAll();
+  assert.equal(document.querySelector('[data-lift="bench"] .podium-value').textContent,'105.0 kg','the board did change');
+  assert.equal(document.getElementById('signOutBtn'),signOut);
+  store.myProfile=async()=>({user_id:'me',status:'active',athlete_id:'A',is_admin:true});
+  await app.refreshAll();
+  assert.match(document.querySelector('#authArea .auth-user').textContent,/admin/);
+});
+test('the planner\'s own controls redraw the planner and leave the boards as they are', async () => {
+  const {app,document}=await application({listAthletes:async()=>[athlete('A',{bench:100})]});
+  const name=document.querySelector('[data-lift="bench"] [data-action="history"]');
+  app.openPlanner();
+  const title=()=>document.querySelector('#plannerBody .planner-title').textContent;
+  assert.match(title(),/This week|Next week/);
+  const before=title();
+  app.stepPlannerWeek(1);
+  assert.notEqual(title(),before);
+  assert.equal(document.querySelector('[data-lift="bench"] [data-action="history"]'),name,'the board was not redrawn');
+  // A refresh that changes nothing keeps the week the visitor paged to.
+  const week=app.plannerWeek;
+  await app.refreshAll();
+  assert.equal(app.plannerWeek,week);
+  assert.notEqual(title(),before);
+});
+test('a control stays focusable while its action runs, and a second click waits', async () => {
+  const {app,document}=await application();
+  const button=document.getElementById('tvModeBtn');
+  let release, runs=0;
+  const action=()=>{runs++;return new Promise((resolve)=>{release=resolve;});};
+  const pending=app.runAction('slow',button,action);
+  // Not `disabled`: Chrome drops focus from a disabled control to the page.
+  assert.deepEqual([button.getAttribute('aria-busy'),button.getAttribute('aria-disabled'),button.disabled],['true','true',false]);
+  await app.runAction('slow',button,action);
+  assert.equal(runs,1);
+  release(); await pending;
+  assert.deepEqual([button.hasAttribute('aria-busy'),button.hasAttribute('aria-disabled')],[false,false]);
+});
+test('🔥 marks every record of the past week, not only the newest dozen in the feed', async () => {
+  const day=86400000;
+  const athletes=Array.from({length:16},(_,i)=>athlete(`a${i}`,{bench:100+i}));
+  const prs=athletes.map((a,i)=>({id:`p${i}`,athlete_id:a.id,payload:{lift:'bench',value:100+i,previous_value:90},decided_at:new Date(Date.now()-i*3600000).toISOString()}));
+  prs.push({id:'old',athlete_id:'a0',payload:{lift:'squat',value:50,previous_value:40},decided_at:new Date(Date.now()-8*day).toISOString()});
+  const {app,document}=await application({listAthletes:async()=>athletes.map((a)=>({...a,squat:a.id==='a0'?50:0})),listRecentPrs:async()=>prs});
+  assert.equal(app.latestPrs().length,12,'the feed stays short');
+  assert.equal(app.freshPrs().size,16);
+  assert.equal(document.querySelectorAll('[data-lift="bench"] .badge-chip.fresh').length,16);
+  assert.equal(document.querySelector('[data-lift="squat"] .badge-chip.fresh'),null,'a record from eight days ago is no longer fresh');
+});
+test('the review queue offers Approve only where approving can succeed', async () => {
+  const request=(id,values)=>({id,kind:'pr',approval:'peer',athlete_id:'on',proposer:'peer',status:'pending',created_at:new Date().toISOString(),payload:{lift:'bench',value:110,previous_value:100},...values});
+  const {app,document}=await application({
+    getSession:async()=>({user:{id:'boss'}}),myProfile:async()=>({user_id:'boss',is_admin:true,status:'active'}),
+    listProfiles:async()=>[{user_id:'boss',github_login:'boss',is_admin:true,status:'active'},{user_id:'peer',github_login:'peer',status:'active',athlete_id:'on'}],
+    listAthletes:async()=>[athlete('on',{bench:100}),athlete('gone',{bench:100,archived_at:'2026-08-01T10:00:00Z'})],
+    listPendingProposals:async()=>[request('fine'),request('orphan',{proposer:null}),request('archived',{athlete_id:'gone'}),
+      request('claim',{kind:'claim',approval:'admin',athlete_id:'gone',payload:{}})],
+  });
+  app.openReview();
+  const control=(action,id)=>document.querySelector(`#reviewList [data-action="${action}"][data-id="${id}"]`);
+  const row=(id)=>control('reject',id).closest('.review-row').textContent;
+  assert.ok(control('approve','fine'));
+  // The database refuses these, so only Reject is offered, with the reason.
+  assert.equal(control('approve','orphan'),null);
+  assert.match(row('orphan'),/a former member[\s\S]*account deleted/);
+  assert.equal(control('approve','archived'),null);
+  assert.match(row('archived'),/athlete archived — restore them first/);
+  assert.ok(control('approve','claim'),'approving a claim is what restores an archived athlete');
+});
+test('a refresh that changes nothing in an open dialog leaves its controls alone', async () => {
+  const {app,store,document}=await application({
+    getSession:async()=>({user:{id:'boss'}}),myProfile:async()=>({user_id:'boss',is_admin:true,status:'active'}),
+    listProfiles:async()=>[{user_id:'boss',github_login:'boss',is_admin:true,status:'active'},{user_id:'peer',github_login:'peer',status:'pending'}],
+    listAthletes:async()=>[athlete('A',{bench:100}),athlete('R',{bench:90,archived_at:'2026-08-01T10:00:00Z'})],
+  });
+  app.openMembers();
+  const select=document.querySelector('#usersList select');
+  // The board changes (so the page redraws), the members list does not.
+  store.listAthletes=async()=>[athlete('A',{bench:105}),athlete('R',{bench:90,archived_at:'2026-08-01T10:00:00Z'})];
+  await app.refreshAll();
+  assert.equal(document.querySelector('[data-lift="bench"] .podium-value').textContent,'105.0 kg');
+  assert.equal(document.querySelector('#usersList select'),select,'an open dropdown is not replaced under the admin');
+  // A change that does concern the list redraws it.
+  store.listProfiles=async()=>[{user_id:'boss',github_login:'boss',is_admin:true,status:'active'},{user_id:'peer',github_login:'peer',status:'blocked'}];
+  await app.refreshAll();
+  assert.notEqual(document.querySelector('#usersList select'),select);
+  // The archived section of the Athletes dialog stays open when the list is redrawn.
+  app.openAthletes();
+  const archived=()=>document.querySelector('#athletesList .archived-list');
+  assert.equal(archived().hasAttribute('open'),false);
+  archived().open=true;
+  store.listAthletes=async()=>[athlete('A',{bench:110}),athlete('R',{bench:90,archived_at:'2026-08-01T10:00:00Z'})];
+  await app.refreshAll();
+  assert.equal(archived().hasAttribute('open'),true);
+});
+test('links and display parameters: the skip link\'s hash, ?tv=0 and a TV that starts on its chosen tab', async () => {
+  // The skip link turns #total into #total-tab; a reload or a shared link still opens Total.
+  const skipped=await application({}, {hash:'#total-tab'});
+  assert.equal(skipped.app.activeTab,'total');
+  const off=await application({}, {search:'?tv=0&bodyweight=0'});
+  assert.deepEqual([off.app.tv.enabled,off.app.bodyweight],[false,false]);
+  const on=await application({}, {search:'?tv=1&bodyweight'});
+  assert.deepEqual([on.app.tv.enabled,on.app.bodyweight],[true,true]);
+  // Latest is empty until its PRs are loaded; the display still starts there.
+  const pr={id:'pr',athlete_id:'A',payload:{lift:'squat',value:120,previous_value:110},decided_at:new Date().toISOString()};
+  const tv=await application({listAthletes:async()=>[athlete('A',{squat:120})],listRecentPrs:async()=>[pr]},{search:'?tv&tabs=latest'});
+  assert.equal(tv.app.activeTab,'latest');
+});
+test('signing in returns to the view it started from', async () => {
+  const replaced=[];
+  const member={getSession:async()=>({user:{id:'me'}}),myProfile:async()=>({user_id:'me',status:'active',athlete_id:'A'}),listAthletes:async()=>[athlete('A')]};
+  // GitHub comes back to the bare page; the view kept at sign-in is restored once.
+  await application({...member,takeReturnView:()=>'?tv&tabs=lifts,total#total'},{replace:(url)=>replaced.push(url)});
+  assert.deepEqual(replaced,['/?tv&tabs=lifts,total#total']);
+  await application({...member,takeReturnView:()=>'?tv'},{search:'?tv',replace:(url)=>replaced.push(url)});
+  await application({takeReturnView:()=>'?tv'},{replace:(url)=>replaced.push(url)});
+  assert.equal(replaced.length,1,'nothing to do when already there, or when the sign-in was abandoned');
+});
+

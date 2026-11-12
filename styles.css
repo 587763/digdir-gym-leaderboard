@@ -17,6 +17,13 @@
   --gold:   #fbbf24;
   --silver: #cbd5e1;
   --bronze: #d8956b;
+  /* sticky notes (the Friday lift) and the highlighter on your own name */
+  --note:        #fdeb86;
+  --note-paper:  linear-gradient(172deg, #fff7b8, var(--note));
+  --note-ink:    #7c5d00;
+  --note-soft:   #6b5a1e;
+  --note-rule:   rgba(124,93,0,.35);
+  --highlighter: linear-gradient(transparent 58%, rgba(250,204,21,.5) 58%, rgba(250,204,21,.5) 92%, transparent 92%);
   --shadow:    0 2px 0 rgba(0,0,0,0.06), 0 6px 16px rgba(0,0,0,0.08);
   --shadow-lg: 0 4px 0 rgba(0,0,0,0.06), 0 12px 30px rgba(0,0,0,0.14);
   --radius: 14px;
@@ -47,6 +54,8 @@ body::before {
 body:has(dialog.modal[open]) { overflow: hidden; }
 .container { max-width: 1440px; margin: 0 auto; }
 [hidden] { display: none !important; }
+/* Read by screen readers, not shown: names for what the page says with an emoji alone. */
+.visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 :focus-visible { outline: 3px solid var(--marker-blue); outline-offset: 4px; }
 button, input, select { -webkit-tap-highlight-color: transparent; }
 .svg-defs { position: absolute; }
@@ -84,7 +93,7 @@ header { margin-bottom: 28px; }
   background: var(--panel); border: 2px solid var(--line);
   border-radius: 999px; padding: 4px 14px;
 }
-.auth-user.view-only { color: var(--ink-soft); border-style: dashed; }
+.auth-user.view-only { border-style: dashed; }
 /* ⚖️ Bodyweight ranking: the toggle reads as switched on while it is pressed. */
 .bodyweight-toggle[aria-pressed="true"] { color: var(--marker-blue); border-color: var(--marker-blue); background: #e9efff; }
 .bodyweight-toggle[aria-pressed="true"]::after { content: ' ✓'; content: ' ✓' / ''; }
@@ -104,8 +113,11 @@ header { margin-bottom: 28px; }
 .btn-ghost     { background: transparent; color: var(--ink-soft); border-color: var(--line); box-shadow: none; }
 .btn-edit      { background: var(--marker-green); border-color: #059669; padding: 6px 14px; }
 .btn-danger    { background: var(--marker-red);   border-color: #dc2626; padding: 6px 14px; }
-button:disabled, input:disabled { cursor: not-allowed; opacity: .6; transform: none; }
+button:disabled, input:disabled, [aria-disabled="true"] { cursor: not-allowed; opacity: .6; transform: none; }
+/* A control whose action is running stays focusable (js/app.js runAction), and looks busy. */
 [aria-busy="true"] { cursor: progress; }
+.btn[aria-disabled="true"]:is(:hover, :active) { transform: none; box-shadow: 2px 2px 0 rgba(0,0,0,0.18); filter: none; }
+.btn-ghost[aria-disabled="true"]:is(:hover, :active) { box-shadow: none; }
 
 .count-badge {
   background: var(--marker-red); color: #fff; border-radius: 999px;
@@ -113,15 +125,13 @@ button:disabled, input:disabled { cursor: not-allowed; opacity: .6; transform: n
 }
 /* approval-type tags */
 .tag { font-family: 'Indie Flower', cursive; font-size: 0.85rem; padding: 1px 8px; border-radius: 999px; vertical-align: middle; }
-.tag-peer  { background: #dbeafe; color: #1e40af; }
-.tag-admin { background: #fef3c7; color: #92400e; }
-.tag-warn  { background: #fee2e2; color: #991b1b; }
 .status-chip { font-family: 'Indie Flower', cursive; font-size: 0.9rem; padding: 1px 8px; border-radius: 999px; }
-.status-pending { background: #fef3c7; color: #92400e; }
-.status-active  { background: #dcfce7; color: #166534; }
-.status-blocked { background: #fee2e2; color: #991b1b; }
-.status-admin   { background: #ede9fe; color: #5b21b6; }
-.status-self    { background: #dbeafe; color: #1e40af; }
+/* chip tones, shared by tags, member statuses and the changes in a PR or a progression */
+.tag-peer, .status-self, .history-delta.first               { background: #dbeafe; color: #1e40af; }
+.tag-admin, .status-pending                                 { background: #fef3c7; color: #92400e; }
+.status-active, .delta.up, .history-delta.up                { background: #dcfce7; color: #166534; }
+.tag-warn, .status-blocked, .delta.down, .history-delta.down { background: #fee2e2; color: #991b1b; }
+.status-admin                                               { background: #ede9fe; color: #5b21b6; }
 .badge-chip { margin-left: 6px; font-size: 1.05rem; vertical-align: middle; }
 .badge-chip.pending { filter: grayscale(0.2); opacity: 0.8; }
 .badge-chip.fresh { margin-left: 4px; }
@@ -134,7 +144,7 @@ body:not(.signed-in) .controls { display: none; }
 .next-lift {
   position: relative; display: flex; align-items: center; gap: 4px 20px; flex-wrap: wrap;
   min-width: 0; max-width: 100%; padding: 10px 16px 10px 18px;
-  background: linear-gradient(172deg, #fff7b8, #fdeb86);
+  background: var(--note-paper);
   border-radius: 2px 2px 16px 2px;
   box-shadow: 0 1px 0 rgba(0,0,0,.05), 4px 8px 14px rgba(120,90,0,.16);
   transform: rotate(-0.8deg);
@@ -143,7 +153,7 @@ body:not(.signed-in) .controls { display: none; }
   content: ''; position: absolute; top: -9px; left: 32px; width: 72px; height: 18px;
   background: rgba(255,255,255,.62); border: 1px solid rgba(0,0,0,.06); transform: rotate(2.5deg);
 }
-.next-lift-eyebrow { font: 700 .7rem/1.4 system-ui, sans-serif; text-transform: uppercase; letter-spacing: .14em; color: #7c5d00; }
+.next-lift-eyebrow { font: 700 .7rem/1.4 system-ui, sans-serif; text-transform: uppercase; letter-spacing: .14em; color: var(--note-ink); }
 .next-lift-when { letter-spacing: .06em; }
 .next-lift-name { font-family: 'Permanent Marker', cursive; font-size: 1.6rem; line-height: 1.15; color: var(--ink); }
 .next-lift .btn { box-shadow: 1px 1px 0 rgba(0,0,0,.15); }
@@ -153,7 +163,7 @@ body:not(.signed-in) .controls { display: none; }
   padding: 0; font: inherit; color: inherit; text-align: left; background: none; border: 0;
 }
 /* A dashed line between the two parts, whichever comes first. */
-.next-lift > :nth-child(2):not(.btn) { padding-left: 18px; border-left: 2px dashed rgba(124,93,0,.35); }
+.next-lift > :nth-child(2):not(.btn) { padding-left: 18px; border-left: 2px dashed var(--note-rule); }
 /* A session before Friday leads; the Friday lift is just its emoji (named in its tooltip). */
 .next-session.lead .next-session-what { font-size: 1.6rem; line-height: 1.15; }
 .next-lift-main.compact { display: flex; flex-direction: column; align-items: center; gap: 2px; cursor: default; }
@@ -161,10 +171,10 @@ body:not(.signed-in) .controls { display: none; }
 button.next-session { cursor: pointer; }
 button.next-session:hover .next-session-what { color: var(--marker-blue); }
 .next-session-what { font-family: 'Permanent Marker', cursive; font-size: 1.15rem; line-height: 1.3; overflow-wrap: anywhere; }
-.next-session-who { font-family: 'Indie Flower', cursive; font-size: 1rem; color: #6b5a1e; }
+.next-session-who { font-family: 'Indie Flower', cursive; font-size: 1rem; color: var(--note-soft); }
 /* Members join the Friday lift from here too. */
 .next-friday-who {
-  display: block; margin-top: 2px; padding: 0; font-family: 'Indie Flower', cursive; font-size: 1rem; color: #6b5a1e;
+  display: block; margin-top: 2px; padding: 0; font-family: 'Indie Flower', cursive; font-size: 1rem; color: var(--note-soft);
   background: none; border: 0; cursor: pointer; text-decoration: underline dotted rgba(124,93,0,.45); text-underline-offset: 3px;
 }
 .next-friday-who:hover { color: var(--marker-blue); }
@@ -211,8 +221,8 @@ body.is-admin   .admin-only  { display: inline-flex; }
 .leaderboard-section h2 .friday-tag { position: absolute; top: -12px; right: 18px; }
 .friday-tag {
   display: inline-block; padding: 1px 8px 2px; vertical-align: middle; white-space: nowrap;
-  font: 700 .66rem/1.5 system-ui, sans-serif; letter-spacing: .1em; text-transform: uppercase; color: #7c5d00;
-  background: #fdeb86; border-radius: 2px 2px 8px 2px; box-shadow: 1px 2px 4px rgba(120,90,0,.14); transform: rotate(-2deg);
+  font: 700 .66rem/1.5 system-ui, sans-serif; letter-spacing: .1em; text-transform: uppercase; color: var(--note-ink);
+  background: var(--note); border-radius: 2px 2px 8px 2px; box-shadow: 1px 2px 4px rgba(120,90,0,.14); transform: rotate(-2deg);
 }
 .friday-callout { margin: -6px 0 18px; font-family: 'Indie Flower', cursive; font-size: 1.1rem; color: var(--ink-soft); }
 .friday-callout .friday-tag { margin: 0 6px 0 0; }
@@ -221,6 +231,7 @@ body.is-admin   .admin-only  { display: inline-flex; }
 .mode-note { margin: -10px 0 20px; font-family: 'Indie Flower', cursive; font-size: 1.05rem; color: var(--ink-soft); }
 .mode-note strong { color: var(--marker-blue); }
 .tab-content { display: none; }
+.tab-content:focus { outline: none; } /* the skip link lands here; no ring around a whole tab */
 .tab-content.active { display: block; animation: fadeIn .25s ease; }
 @keyframes fadeIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
 
@@ -270,7 +281,7 @@ body.is-admin   .admin-only  { display: inline-flex; }
 .pr-value { font-size: 1.4rem; font-weight: 700; color: var(--marker-blue); }
 .pr-value, .podium-value { font-variant-numeric: tabular-nums; white-space: nowrap; }
 /* The signed-in member's own entries get a highlighter stroke. */
-.is-me .athlete-link { background: linear-gradient(transparent 58%, rgba(250, 204, 21, .5) 58%, rgba(250, 204, 21, .5) 92%, transparent 92%); }
+.is-me .athlete-link, .athlete-link.is-me { background: var(--highlighter); }
 .achievement-badge.is-me { border-color: var(--marker-blue); }
 
 /* Latest verified PRs */
@@ -279,7 +290,7 @@ body.is-admin   .admin-only  { display: inline-flex; }
 .latest-who { display: flex; align-items: center; gap: 10px; }
 .latest-who > svg { flex: 0 0 auto; }
 .latest-who > span { display: flex; flex-direction: column; min-width: 0; }
-.latest-who .athlete-link { font-size: 1.25rem; font-weight: 600; overflow-wrap: anywhere; }
+.latest-who .athlete-link { align-self: flex-start; font-size: 1.25rem; font-weight: 600; overflow-wrap: anywhere; }
 .latest-lift { font-family: 'Indie Flower', cursive; font-size: 1rem; color: var(--ink-soft); }
 .latest-when { white-space: nowrap; }
 .latest-table .delta { display: block; width: max-content; margin: 2px 0 0 auto; }
@@ -354,14 +365,14 @@ body.is-admin   .admin-only  { display: inline-flex; }
 .planner-today { margin-left: auto; font: 700 .65rem/1.6 system-ui, sans-serif; text-transform: uppercase; letter-spacing: .12em; color: var(--marker-blue); }
 .friday-chip {
   align-self: flex-start; justify-self: start; max-width: 100%; padding: 2px 10px 4px; font-family: 'Permanent Marker', cursive; font-size: 1rem; line-height: 1.3;
-  background: #fdeb86; border-radius: 2px 2px 10px 2px; transform: rotate(-1deg); box-shadow: 1px 2px 4px rgba(120,90,0,.14);
+  background: var(--note); border-radius: 2px 2px 10px 2px; transform: rotate(-1deg); box-shadow: 1px 2px 4px rgba(120,90,0,.14);
 }
 /* In the planner, members join the Friday lift from its note. */
 .friday-card { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; padding: 4px 10px 8px; }
 .friday-card .plan-activity { font-family: inherit; font-size: 1rem; font-weight: 400; }
 .friday-card-who { font-family: 'Caveat', cursive; font-size: 1.05rem; font-weight: 600; color: var(--marker-green); overflow-wrap: anywhere; }
 .friday-card.joined { box-shadow: 0 0 0 2px var(--marker-green), 1px 2px 4px rgba(120,90,0,.14); }
-.friday-chip-label { display: block; font: 700 .6rem/1.6 system-ui, sans-serif; text-transform: uppercase; letter-spacing: .14em; color: #7c5d00; }
+.friday-chip-label { display: block; font: 700 .6rem/1.6 system-ui, sans-serif; text-transform: uppercase; letter-spacing: .14em; color: var(--note-ink); }
 .planner-plans { list-style: none; display: flex; flex-direction: column; gap: 8px; }
 .plan-card { position: relative; min-width: 0; padding: 8px 10px; background: #fff; border: 2px solid var(--line); border-radius: 10px; box-shadow: 1px 1px 0 rgba(0,0,0,.05); }
 .plan-card.mine { border-color: var(--marker-blue); }
@@ -402,7 +413,7 @@ body.is-admin   .admin-only  { display: inline-flex; }
 .session-people li svg { flex: 0 0 auto; }
 .session-people .plan-time { min-width: 3.2em; }
 .session-name { min-width: 0; font-weight: 600; overflow-wrap: anywhere; }
-.session-people .is-me .session-name { background: linear-gradient(transparent 58%, rgba(250, 204, 21, .5) 58%, rgba(250, 204, 21, .5) 92%, transparent 92%); }
+.session-people .is-me .session-name { background: var(--highlighter); }
 .join-form { padding-top: 12px; border-top: 2px dashed var(--line); }
 .join-form .form-group input { max-width: 12rem; }
 .join-form .field-hint { display: block; color: var(--ink-soft); }
@@ -472,14 +483,11 @@ body.is-admin   .admin-only  { display: inline-flex; }
 .form-row .form-group label { flex: 1; }
 .form-group { margin-bottom: 16px; }
 .form-group label { display: block; font-size: 1.15rem; font-weight: 600; margin-bottom: 4px; color: var(--ink-soft); }
-.form-group input {
+.form-group input, .form-group textarea {
   width: 100%; font-family: 'Caveat', cursive; font-size: 1.25rem;
   padding: 8px 12px; border: 2px solid var(--line); border-radius: 10px; background: #fff; color: var(--ink);
 }
-.form-group textarea {
-  width: 100%; font-family: 'Caveat', cursive; font-size: 1.25rem; resize: vertical;
-  padding: 8px 12px; border: 2px solid var(--line); border-radius: 10px; background: #fff; color: var(--ink);
-}
+.form-group textarea { resize: vertical; }
 .form-group input:focus, .form-group textarea:focus { outline: none; border-color: var(--marker-blue); }
 .plan-friday { margin: -10px 0 8px; }
 .form-section-title { font-family: 'Permanent Marker', cursive; font-size: 1.2rem; margin: 8px 0 10px; }
@@ -530,8 +538,6 @@ body.is-admin   .admin-only  { display: inline-flex; }
 .linked-to { color: var(--ink-soft); font-size: 1rem; margin-left: 6px; }
 .review-list .form-section-title:not(:first-child) { margin-top: 14px; }
 .delta { font-family: 'Indie Flower', cursive; font-size: .95rem; padding: 0 8px; border-radius: 999px; white-space: nowrap; }
-.delta.up   { background: #dcfce7; color: #166534; }
-.delta.down { background: #fee2e2; color: #991b1b; }
 .list-toolbar { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; margin-bottom: 20px; }
 .list-filter {
   flex: 1 1 180px; font-family: 'Caveat', cursive; font-size: 1.2rem; color: var(--ink);
@@ -583,9 +589,6 @@ body.is-admin   .admin-only  { display: inline-flex; }
 .history-lift-head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
 .history-lift-head h3 { font-family: 'Permanent Marker', cursive; font-size: 1.3rem; }
 .history-delta { font-family: 'Indie Flower', cursive; font-size: 1.1rem; padding: 1px 10px; border-radius: 999px; }
-.history-delta.up   { background: #dcfce7; color: #166534; }
-.history-delta.down { background: #fee2e2; color: #991b1b; }
-.history-delta.first { background: #dbeafe; color: #1e40af; }
 .sparkline {
   width: 100%; height: auto; margin: 10px 0 6px; display: block;
   overflow: visible;
@@ -652,7 +655,7 @@ body.is-admin   .admin-only  { display: inline-flex; }
   .next-lift { width: 100%; transform: rotate(-0.5deg); }
   .next-lift-name { font-size: 1.4rem; }
   .next-session { width: 100%; max-width: none; }
-  .next-lift > :nth-child(2):not(.btn, .compact) { width: 100%; padding: 8px 0 0; border-left: 0; border-top: 2px dashed rgba(124,93,0,.35); }
+  .next-lift > :nth-child(2):not(.btn, .compact) { width: 100%; padding: 8px 0 0; border-left: 0; border-top: 2px dashed var(--note-rule); }
   .next-lift > :nth-child(2).compact { padding-left: 0; border-left: 0; flex-direction: row; align-items: center; gap: 6px; }
   .controls .btn { font-size: 1.05rem; padding: 6px 12px; }
   .toast-region { left: 14px; right: 14px; bottom: 14px; max-width: none; }
@@ -682,7 +685,7 @@ body.is-admin   .admin-only  { display: inline-flex; }
 /* ===========================================================================
    TV / display mode (html.tv-mode) — full-screen landscape board that uses the
    horizontal space and auto-cycles tabs hands-free. Toggled by ?tv or the 📺
-   button; rotation + the countdown bar are driven from js/app.js.
+   button; rotation, paging and the countdown bar are driven from js/tv.js.
    =========================================================================== */
 /* Scale every rem-based size up for across-the-room reading; adapts 1080p→4K. */
 html.tv-mode { font-size: clamp(18px, 1.15vw, 30px); }
@@ -719,18 +722,18 @@ html.tv-mode, .tv-mode body { height: 100vh; overflow: hidden; }
 .tv-mode .tv-next-lift {
   display: flex; align-self: center; min-width: 0; overflow: hidden; margin: 0 11rem 0 auto;
   padding: 4px 18px 6px; font-family: 'Permanent Marker', cursive; font-size: 1.7rem; color: var(--ink);
-  background: linear-gradient(172deg, #fff7b8, #fdeb86); border-radius: 2px 2px 14px 2px;
+  background: var(--note-paper); border-radius: 2px 2px 14px 2px;
   box-shadow: 3px 6px 12px rgba(120,90,0,.16); transform: rotate(-1deg);
 }
 .tv-mode .tv-note { display: flex; align-items: center; gap: 2px 22px; min-width: 0; }
 .tv-mode .tv-part { display: flex; align-items: baseline; gap: .4em; flex: 0 0 auto; white-space: nowrap; }
 .tv-mode .tv-session { flex-shrink: 1; min-width: 0; }
-.tv-mode .tv-part + .tv-part { padding-left: 22px; border-left: 2px dashed rgba(124,93,0,.35); }
-.tv-mode .tv-next-lift-when { font: 700 .75rem/1 system-ui, sans-serif; text-transform: uppercase; letter-spacing: .14em; color: #7c5d00; }
+.tv-mode .tv-part + .tv-part { padding-left: 22px; border-left: 2px dashed var(--note-rule); }
+.tv-mode .tv-next-lift-when { font: 700 .75rem/1 system-ui, sans-serif; text-transform: uppercase; letter-spacing: .14em; color: var(--note-ink); }
 .tv-mode .tv-session:not(.lead), .tv-mode .tv-friday.compact { font-size: 1.25rem; }
 .tv-mode .tv-friday.compact { flex-direction: column; align-items: center; gap: 2px; }
 .tv-mode .tv-session-what { flex: 0 1 auto; min-width: 2em; overflow: hidden; text-overflow: ellipsis; }
-.tv-mode .tv-session-who { font-family: 'Indie Flower', cursive; font-size: .65em; color: #6b5a1e; }
+.tv-mode .tv-session-who { font-family: 'Indie Flower', cursive; font-size: .65em; color: var(--note-soft); }
 /* Narrower TVs: the Friday lift and a session after it stack, so the note stays beside the title. */
 @media (max-width: 1500px) {
   .tv-mode .tv-note.friday-first { flex-direction: column; align-items: flex-start; }
@@ -791,10 +794,9 @@ html.tv-mode, .tv-mode body { height: 100vh; overflow: hidden; }
 .tv-mode .leaderboard-table td { padding: 6px 10px; }
 .tv-mode .podium-name { font-size: 1.45rem; }
 
-/* Keep the podium, but trim its footprint in TV mode so more ranked rows fit per
-   page (fewer, faster-cycling pages). Shorter stands + tighter stack here; the avatar
-   and medal are shrunk via their size args in renderPodium (explicit SVG width/height,
-   centred by construction). Still clearly a top-3 podium. */
+/* Keep the podium, but trim its footprint in TV mode so more ranked rows fit beside it.
+   Shorter stands and a tighter stack here; BoardView.podium draws smaller figures and
+   medals on TV. It shows on a board's first page only (js/tv.js). */
 .tv-mode .podium-avatars { height: 60px; }
 .tv-mode .podium-athlete { margin-bottom: 2px; }
 .tv-mode .podium-medal { margin-top: -4px; }
@@ -826,7 +828,7 @@ html.tv-mode.tv-badges-withdrawn .achievement-chip { display: none; }
 
 /* Page dots: shown when a tab's roster spans more than one screen. The rotation
    cycles a page per tick before advancing to the next tab; the active dot tracks
-   which slice is on screen. TV_PAGE_PAD in app.js reserves the room below. */
+   which slice is on screen. TvDisplay.PAGE_PAD (js/tv.js) reserves the room below. */
 .tv-page-dots { position: absolute; left: 0; right: 0; bottom: 8px; display: flex; justify-content: center; gap: 12px; }
 .tv-page-dot { width: 12px; height: 12px; border-radius: 50%; border: 2px solid var(--ink); opacity: 0.4; }
 .tv-page-dot.active { background: var(--marker-blue); border-color: var(--marker-blue); opacity: 1; }

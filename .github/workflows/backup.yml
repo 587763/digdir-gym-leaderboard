@@ -9,7 +9,12 @@ name: Database backup
 #     postgresql://postgres:<PASSWORD>@db.hqrqmkherwdkfvhjypuk.supabase.co:5432/postgres
 #   Find it in Supabase → Project Settings → Database → Connection string (URI).
 #   This grants full DB access — keep it ONLY in Actions secrets, never in the repo.
-# The workflow no-ops with a clear message until that secret is set.
+# The workflow fails with a clear message until that secret is set.
+#
+# Only athletes, profiles and proposals are dumped. The planner's tables (plans, plan_joins,
+# friday_joins) are left out on purpose: they are short-lived, and they say when members are
+# at the gym, which only members may read. Workflow artifacts of a public repository can be
+# downloaded by any signed-in GitHub user.
 
 on:
   schedule:

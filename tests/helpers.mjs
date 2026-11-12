@@ -43,15 +43,16 @@ export function environment(files = ['ui', 'lifts', 'avatar', 'history']) {
   return context;
 }
 
-// The full app against an in-memory Store double; override any Store method.
-export async function application(overrides = {}, { search = '', hash = '' } = {}) {
+// The full app against an in-memory Store double; override any Store method, and any part of
+// `location` (search, hash, replace).
+export async function application(overrides = {}, location = {}) {
   const context = environment(['ui', 'achievements', 'changelog', 'lifts', 'avatar', 'history', 'board', 'planner', 'tv']);
-  Object.assign(context.location, { search, hash });
+  Object.assign(context.location, { search: '', hash: '', ...location });
   const store = {
     configured: true, getSession: async () => null, listAthletes: async () => [],
     myProfile: async () => null, listProfiles: async () => [], listPendingProposals: async () => [],
     listRecentPrs: async () => [], listAthleteHistory: async () => [], listPlans: async () => [], listFridayJoins: async () => [], onAuthChange() {}, subscribe() {},
-    userLabel: () => 'member', ...overrides,
+    userLabel: () => 'member', takeReturnView: () => '', ...overrides,
   };
   context.Store = store;
   vm.runInContext(read('js/app.js'), context, { filename: 'app.js' });

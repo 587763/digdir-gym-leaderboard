@@ -121,15 +121,16 @@ window.Lifts = (() => {
     });
   };
 
+  // A plain number such as "102.5" (no sign, exponent or stray characters), or NaN.
+  const decimal = (raw) => /^\d+(?:\.\d+)?$/.test(raw) ? Number(raw) : NaN;
+  // Kilograms take one decimal.
+  const oneDecimal = (n) => Math.abs(n * 10 - Math.round(n * 10)) < 0.000001;
   // Form input → stored value, or NaN when invalid for the exercise's unit.
   const parse = (id, input) => {
     const raw = String(input ?? '').trim();
-    const n = unit(id) === 'time' ? parseTime(raw)
-      : raw === '' ? 0 : /^\d+(?:\.\d+)?$/.test(raw) ? Number(raw) : NaN;
+    const n = unit(id) === 'time' ? parseTime(raw) : raw === '' ? 0 : decimal(raw);
     if (!Number.isFinite(n) || n < 0 || n > MAX) return NaN;
-    if (unit(id) !== 'kg' && !Number.isInteger(n)) return NaN;
-    if (unit(id) === 'kg' && Math.abs(n * 10 - Math.round(n * 10)) > 0.000001) return NaN;
-    return n;
+    return (unit(id) === 'kg' ? oneDecimal(n) : Number.isInteger(n)) ? n : NaN;
   };
   // Stored value → the text a form field shows; blank means "no entry".
   const inputValue = (id, raw) => number(raw) <= 0 ? '' : unit(id) === 'time' ? formatTime(raw) : String(number(raw));
@@ -138,9 +139,8 @@ window.Lifts = (() => {
   const parseBodyweight = (input) => {
     const raw = String(input ?? '').trim();
     if (!raw) return null;
-    const n = /^\d+(?:\.\d+)?$/.test(raw) ? Number(raw) : NaN;
-    if (!(n >= BODYWEIGHT.MIN && n <= BODYWEIGHT.MAX) || Math.abs(n * 10 - Math.round(n * 10)) > 0.000001) return NaN;
-    return n;
+    const n = decimal(raw);
+    return n >= BODYWEIGHT.MIN && n <= BODYWEIGHT.MAX && oneDecimal(n) ? n : NaN;
   };
 
   return { MAX, BODYWEIGHT, all, main, extra, groups, bodyweightBoards, bodyweightBoard, get, inGroup, unit, value, bodyweight, format,
