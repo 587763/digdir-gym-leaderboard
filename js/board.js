@@ -12,7 +12,7 @@
 //   friday: { id, label, title }  this Friday's lift (Planner.fridayBoard), stickered on its board
 //   latest: [{ id, athlete, lift, value, previous, at }]  newest first }
 window.BoardView = (() => {
-  const { html, raw } = UI;
+  const { html, raw, icon } = UI;
   const MEDALS = { 1: '🥇', 2: '🥈', 3: '🥉' };
   const MEDAL_COLORS = { 1: ['var(--gold)', '#d99e16'], 2: ['var(--silver)', '#94a3b8'], 3: ['var(--bronze)', '#b06a44'] };
   // More medalists than this (big ties) use the complete ranked table instead.
@@ -21,7 +21,6 @@ window.BoardView = (() => {
   const TV_MIN_PODIUM_HEIGHT = 760;
   // Names per row when a crowded TV Hall of Fame falls back to paged tables.
   const HALL_COLUMNS = 3;
-  const icon = (emoji) => html`<span aria-hidden="true">${emoji}</span>`;
   const avatar = (athlete, size) => raw(window.renderAvatar(athlete, size, { decorative: true }));
 
   // A bodyweight board's title says how it is adjusted; its score column names the unit.
@@ -31,14 +30,16 @@ window.BoardView = (() => {
   const scoreHeading = (lift) => lift.id === 'total' ? 'Total (kg)' : HEADINGS[lift.unit] ?? 'PR (kg)';
 
   const badges = (athlete) => window.ACHIEVEMENTS.filter((a) => window.hasAchievement(athlete, a))
-    .map((a) => html`<span class="badge-chip achievement-chip" title="${a.name}">${a.emoji}</span>`);
+    .map((a) => html`<span class="badge-chip achievement-chip" role="img" aria-label="${a.name}" title="${a.name}">${a.emoji}</span>`);
 
+  // Each chip is an image with a name: a screen reader says what it means, not "hourglass".
+  const pendingChip = raw('<span class="badge-chip pending" role="img" aria-label="Has a pending change" title="Has a pending change">⏳</span>');
   // Status chips after a name: a pending change, or a PR verified in the last week
   // (on a bodyweight board, a fresh PR in the exercise it adjusts).
   function chips(athlete, liftId, ctx) {
     const freshAt = ctx.fresh?.get(`${athlete.id}:${Lifts.get(liftId)?.base ?? liftId}`);
-    return html`${ctx.pending?.has(athlete.id) && raw('<span class="badge-chip pending" title="Has a pending change">⏳</span>')}${
-      freshAt && html`<span class="badge-chip fresh" title="New PR, verified ${UI.timeAgo(freshAt)}">🔥</span>`}`;
+    return html`${ctx.pending?.has(athlete.id) && pendingChip}${
+      freshAt && html`<span class="badge-chip fresh" role="img" aria-label="New PR, verified ${UI.timeAgo(freshAt)}" title="New PR, verified ${UI.timeAgo(freshAt)}">🔥</span>`}`;
   }
 
   // Inline SVG medal (gold/silver/bronze + rank), symmetric about the viewBox center
@@ -60,16 +61,18 @@ window.BoardView = (() => {
     html`<button type="button" class="${cls}" data-action="history" data-id="${athlete.id}" title="See progression">${athlete.name}</button>`;
 
   function podium(winners, lift, ctx) {
-    const spots = [2, 1, 3].map((rank) => {
+    // In rank order, so gold is read (and reached by keyboard) first; CSS draws 2, 1, 3.
+    const spots = [1, 2, 3].map((rank) => {
       const athletes = winners.filter((row) => row.rank === rank);
       if (!athletes.length) return '';
       const size = athletes.length > 1 ? 36 : ctx.tv ? 48 : 64;
-      const mine = athletes.some(({ athlete }) => athlete.id === ctx.me);
-      return html`<div class="podium-spot ${['', 'first', 'second', 'third'][rank]}${mine && ' is-me'}">
+      // Only the member's own name is highlighted, not everyone they share the step with.
+      const name = (athlete) => html`${historyLink(athlete, athlete.id === ctx.me ? 'athlete-link is-me' : 'athlete-link')}${chips(athlete, lift.id, ctx)}`;
+      return html`<div class="podium-spot ${['', 'first', 'second', 'third'][rank]}">
         <div class="podium-athlete">
           <div class="podium-avatars">${athletes.map(({ athlete }) => avatar(athlete, size))}</div>
           <div class="podium-medal">${medal(rank, ctx.tv ? 26 : 28)}</div>
-          <div class="podium-name">${athletes.map(({ athlete }, i) => html`${i > 0 && raw('<span class="tie-join"> &amp; </span>')}${historyLink(athlete)}${chips(athlete, lift.id, ctx)}`)}</div>
+          <div class="podium-name">${athletes.map(({ athlete }, i) => html`${i > 0 && raw('<span class="tie-join"> &amp; </span>')}${name(athlete)}`)}</div>
           <div class="podium-value">${Lifts.formatUnit(lift.id, athletes[0].value)}</div>
         </div><div class="podium-stand"><div class="podium-rank">${rank}</div></div>
       </div>`;
@@ -106,7 +109,7 @@ window.BoardView = (() => {
     const body = ranked.length === 0
       ? emptyRow(ctx, 3, lift.base ? html`No one on this board yet.<br><span>Share your bodyweight in My PRs to join.</span>` : undefined)
       : tableRows.map((r) => row(r, lift, ctx));
-    return html`<div class="leaderboard-section${liftId === 'total' ? ' leaderboard-total' : ''}" data-lift="${liftId}">
+    return html`<div class="leaderboard-section${(lift.base ?? lift.id) === 'total' ? ' leaderboard-total' : ''}" data-lift="${liftId}">
           <h2>${title(lift)}${ctx.friday?.id === (lift.base ?? lift.id) && html` <span class="friday-tag" title="${ctx.friday.title}">📅 ${ctx.friday.label}</span>`}</h2>${withPodium && podium(winners, lift, ctx)}
           <table class="leaderboard-table" id="${liftId}Table"${ranked.length > 0 && tableRows.length === 0 && raw(' hidden')}><thead><tr><th scope="col">Rank</th><th scope="col">Name</th><th scope="col">${scoreHeading(lift)}</th></tr></thead><tbody>${body}</tbody></table>
         </div>`;
@@ -171,5 +174,5 @@ window.BoardView = (() => {
     })}`;
   }
 
-  return { section, group, latest, latestStrip, podium, medal, badges, hallOfFame, MAX_PODIUM_ATHLETES };
+  return { section, group, latest, latestStrip, badges, pendingChip, hallOfFame };
 })();

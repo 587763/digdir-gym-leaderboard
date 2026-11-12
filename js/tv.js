@@ -7,12 +7,10 @@ window.TvDisplay = class TvDisplay {
   static MIN_DWELL_MS = 5000; // later pages stay readable even for huge rosters
 
   // app provides: activeTab, switchTab(tab), render(), renderBoard(liftId, podiumFits),
-  // and hasContent(tab) to skip empty tabs.
+  // renderHallOfFame(asTables), and hasContent(tab) to skip empty tabs.
   constructor(app, params = new URLSearchParams(location.search)) {
     this.app = app;
-    let saved = false;
-    try { saved = localStorage.getItem('lb.tv') === '1'; } catch { /* Storage may be disabled. */ }
-    this.enabled = params.has('tv') || saved;
+    this.enabled = UI.hasParam('tv', params) || UI.stored.get('lb.tv') === '1';
     // ?rotate=<seconds>: target time per tab (5–120 s, default 15).
     this.rotateMs = Math.min(120000, Math.max(5000, (Number(params.get('rotate')) || 15) * 1000));
     // ?tabs=lifts,total: optionally restrict which tabs the display cycles through.
@@ -27,14 +25,12 @@ window.TvDisplay = class TvDisplay {
 
   apply(on) {
     this.enabled = on;
-    const button = document.getElementById('tvModeBtn');
-    button.setAttribute('aria-pressed', String(on));
-    button.textContent = on ? '✕ Exit TV mode' : '📺 TV mode';
+    // The label says which way the button goes, so it carries no aria-pressed as well.
+    document.getElementById('tvModeBtn').textContent = on ? '✕ Exit TV mode' : '📺 TV mode';
     document.documentElement.classList.toggle('tv-mode', on);
     if (on) {
       UI.dialogs.closeAll();
-      const tabs = this.rotationTabs();
-      if (!tabs.includes(this.app.activeTab)) this.app.switchTab(tabs[0]);
+      this.showRotationTab();
     } else { this.page = 0; document.querySelectorAll('.tv-page-dots').forEach((d) => d.remove()); }
     this.app.render(); // podium sizes and Hall of Fame layout differ in TV mode
     if (on) this.start(); else this.stop();
@@ -42,12 +38,17 @@ window.TvDisplay = class TvDisplay {
 
   toggle() {
     const on = !this.enabled;
-    try { localStorage.setItem('lb.tv', on ? '1' : '0'); } catch { /* private mode */ }
-    // Keep the URL honest so a reload matches what's on screen.
-    const url = new URL(location.href);
-    if (on) url.searchParams.set('tv', '1'); else url.searchParams.delete('tv');
-    history.replaceState(null, '', url);
+    UI.stored.set('lb.tv', on ? '1' : '0');
+    UI.setParam('tv', on);
     this.apply(on);
+  }
+
+  // The display starts on a tab of its rotation. The app calls this again once the first
+  // data is in, because only then is it known which tabs have something to show.
+  showRotationTab() {
+    if (!this.enabled) return;
+    const tabs = this.rotationTabs();
+    if (!tabs.includes(this.app.activeTab)) this.app.switchTab(tabs[0]);
   }
 
   // Tabs to cycle, in on-screen order, skipping tabs with nothing to show.
@@ -128,19 +129,37 @@ window.TvDisplay = class TvDisplay {
   }
 
   // --- fitting and paging ------------------------------------------------------
-  // Fit variable-height rows (including wrapped names) into the actual screen space,
-  // withdrawing a podium when it leaves no room for up to two ranked rows.
+  // Fit variable-height rows (including wrapped names) into the actual screen space.
+  // What gives way when rows don't fit, in order: a podium that leaves no room for two
+  // ranked rows, the Hall of Fame's badge cards, the latest-PRs line, then the badges.
   fit() {
     const frame = document.querySelector('.tab-content.active');
     if (!this.enabled || !frame) { this.pages = 1; return; }
     const previousPages = this.pages;
     const previousPage = this.page;
-    // The latest-PRs line along the bottom takes its room back on every fit; below, it gives
-    // way on this tab if a ranked row could not fit beside it.
+    // Everything withdrawn takes its room back on every fit (fonts, screen size or the
+    // active tab may have changed), and gives way again below if it must.
     const root = document.documentElement;
     root.classList.remove('tv-latest-withdrawn', 'tv-badges-withdrawn');
-    let bottom = frame.getBoundingClientRect().bottom - TvDisplay.PAGE_PAD;
-    // Reconsider podiums after fonts, available height or the active tab change.
+    const bottom = () => frame.getBoundingClientRect().bottom - TvDisplay.PAGE_PAD;
+    this.fitPodiums(frame, bottom());
+    if (frame.querySelector('#hallOfFame') && this.app.renderHallOfFame(false).getBoundingClientRect().bottom > bottom()) {
+      this.app.renderHallOfFame(true); // badge cards don't fit: paged tables
+    }
+    // A ranked row taller than a whole page (a long name wrapping in a narrow column on a
+    // small TV) would run off the screen.
+    if (this.hasOversizedRow(frame, bottom()) && !document.getElementById('tvLatest').hidden) root.classList.add('tv-latest-withdrawn');
+    if (this.hasOversizedRow(frame, bottom())) root.classList.add('tv-badges-withdrawn');
+    this.boards = this.paginate(frame, bottom());
+    this.pages = Math.max(1, ...this.boards.map((board) => board.slices.length));
+    this.page = Math.min(this.page, this.pages - 1);
+    this.applyPage();
+    if (previousPages !== this.pages || previousPage !== this.page) this.restart();
+  }
+
+  // Draw every board with its podium, then withdraw a podium that leaves no room for up to
+  // two ranked rows on its first page.
+  fitPodiums(frame, bottom) {
     for (const liftId of [...frame.querySelectorAll('[data-lift]')].map((s) => s.dataset.lift)) {
       const section = this.app.renderBoard(liftId, true);
       const podium = section.querySelector('.podium-container');
@@ -152,49 +171,51 @@ window.TvDisplay = class TvDisplay {
         : section.querySelector('tbody').getBoundingClientRect().top;
       if (start + needed > bottom) this.app.renderBoard(liftId, false);
     }
-    // Hall of Fame: badge cards when they fit, otherwise paged tables.
-    if (frame.querySelector('#hallOfFame') && this.app.renderHallOfFame(false).getBoundingClientRect().bottom > bottom) {
-      this.app.renderHallOfFame(true);
-    }
-    // A ranked row taller than a whole page (a long name wrapping in a narrow column on a small
-    // TV) would run off the screen: the latest-PRs line gives way, as a podium does, and then
-    // the achievement badges after the names (the Hall of Fame still shows them).
-    const tooTall = () => [...frame.querySelectorAll('.leaderboard-section tbody')].some((tbody) => {
-      if (tbody.querySelector('.empty-state')) return false;
-      const rows = [...tbody.querySelectorAll('tr')];
-      rows.forEach((tr) => { tr.hidden = false; });
-      const room = bottom - tbody.getBoundingClientRect().top;
-      return rows.some((tr) => tr.getBoundingClientRect().height > room);
-    });
-    if (tooTall() && !document.getElementById('tvLatest').hidden) {
-      root.classList.add('tv-latest-withdrawn');
-      bottom = frame.getBoundingClientRect().bottom - TvDisplay.PAGE_PAD;
-    }
-    if (tooTall()) root.classList.add('tv-badges-withdrawn');
-    this.boards = [];
-    let pages = 1;
-    frame.querySelectorAll('.leaderboard-section').forEach((section) => {
-      const tbody = section.querySelector('tbody');
-      const rows = tbody && !tbody.querySelector('.empty-state') ? [...tbody.querySelectorAll('tr')] : [];
-      if (rows.length === 0) return;
-      rows.forEach((tr) => { tr.hidden = false; }); // measure the full table, not a prior page
-      const room = Math.max(1, bottom - tbody.getBoundingClientRect().top);
-      const slices = this.partitionRows(rows, room);
-      this.boards.push({ rows, slices });
-      pages = Math.max(pages, slices.length);
-    });
-    this.pages = pages;
-    this.page = Math.min(this.page, pages - 1);
-    this.applyPage();
-    if (previousPages !== pages || previousPage !== this.page) this.restart();
   }
 
-  partitionRows(rows, room) {
+  // The ranked rows of a board (none for an empty board's message), all showing.
+  rankedRows(section) {
+    const tbody = section.querySelector('tbody');
+    if (!tbody || tbody.querySelector('.empty-state')) return [];
+    const rows = [...tbody.querySelectorAll('tr')];
+    rows.forEach((tr) => { tr.hidden = false; }); // measure the full table, not a prior page
+    return rows;
+  }
+
+  hasOversizedRow(frame, bottom) {
+    return [...frame.querySelectorAll('.leaderboard-section')].some((section) => {
+      const rows = this.rankedRows(section);
+      const room = rows.length && bottom - section.querySelector('tbody').getBoundingClientRect().top;
+      return rows.some((tr) => tr.getBoundingClientRect().height > room);
+    });
+  }
+
+  // Each board's rows cut into pages. A podium shows on the first page only, so the pages
+  // after it have its room for rows too (fewer pages, and a shorter wait for the next tab).
+  paginate(frame, bottom) {
+    const boards = [];
+    for (const section of frame.querySelectorAll('.leaderboard-section')) {
+      const rows = this.rankedRows(section);
+      if (rows.length === 0) continue;
+      const tbody = section.querySelector('tbody');
+      const podium = section.querySelector('.podium-container');
+      const room = (showPodium) => {
+        if (podium) podium.hidden = !showPodium;
+        return Math.max(1, bottom - tbody.getBoundingClientRect().top);
+      };
+      const later = room(false), first = room(true);
+      boards.push({ rows, podium, slices: this.partitionRows(rows, first, later) });
+    }
+    return boards;
+  }
+
+  // Rows packed into pages: `room` px on the first page, `laterRoom` on those after it.
+  partitionRows(rows, room, laterRoom = room) {
     const slices = [[]];
-    let height = 0;
+    let height = 0, limit = room;
     for (const row of rows) {
       const rowHeight = row.getBoundingClientRect().height || 1;
-      if (height + rowHeight > room && slices.at(-1).length) { slices.push([]); height = 0; }
+      if (height + rowHeight > limit && slices.at(-1).length) { slices.push([]); height = 0; limit = laterRoom; }
       slices.at(-1).push(row);
       height += rowHeight;
     }
@@ -204,9 +225,11 @@ window.TvDisplay = class TvDisplay {
   // Show the current page's slice of each board, then draw the page dots. A board
   // with fewer pages pins to its last page, so it never blinks empty.
   applyPage() {
-    this.boards.forEach(({ rows, slices }) => {
-      const visible = new Set(slices[Math.min(this.page, slices.length - 1)]);
+    this.boards.forEach(({ rows, slices, podium }) => {
+      const page = Math.min(this.page, slices.length - 1);
+      const visible = new Set(slices[page]);
       rows.forEach((row) => { row.hidden = !visible.has(row); });
+      if (podium) podium.hidden = page > 0;
     });
     const frame = document.querySelector('.tab-content.active');
     if (!frame) return;

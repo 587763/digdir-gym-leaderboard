@@ -1,6 +1,9 @@
 -- Digdir Gym Leaderboard — full database schema (fresh install).
 -- Paste into Supabase → SQL Editor → Run. Recreates everything from scratch.
 -- For an EXISTING database, use the incremental files in supabase/migrations/ instead.
+-- Profiles are made when someone signs up, so on a project that already has users (a reset
+-- rather than a first install) delete them under Authentication first: they would be left
+-- without a profile, and nobody would be admin.
 --
 -- Governance model: GitHub login for identity; an admin (bootstrapped below) approves
 -- people and links each to one athlete; PR/achievement changes are peer-verified;
@@ -58,15 +61,21 @@ create table public.profiles (
 );
 create unique index profiles_athlete_unique on public.profiles(athlete_id) where athlete_id is not null;
 
+-- Only GitHub vouches for a login and a name. Any other way of signing up (the Auth email
+-- provider, say) sends metadata the caller typed, so it is ignored: such an account gets a
+-- nameless pending profile, never one that looks like a colleague's. The first admin is the
+-- maintainer's GitHub login, and only while there is no admin yet.
 create or replace function public.handle_new_user()
 returns trigger language plpgsql security definer set search_path = public as $$
-declare login text;
+declare github boolean := coalesce(new.raw_app_meta_data->>'provider' = 'github', false); login text; first_admin boolean;
 begin
-  login := coalesce(new.raw_user_meta_data->>'user_name', new.raw_user_meta_data->>'preferred_username');
+  if github then
+    login := coalesce(new.raw_user_meta_data->>'user_name', new.raw_user_meta_data->>'preferred_username');
+  end if;
+  first_admin := coalesce(login = '587763', false) and not exists (select 1 from public.profiles where is_admin);
   insert into public.profiles (user_id, github_login, display_name, is_admin, status)
-  values (new.id, login, coalesce(new.raw_user_meta_data->>'full_name', login),
-          coalesce(login = '587763' and new.raw_app_meta_data->>'provider' = 'github', false),
-          case when login = '587763' and new.raw_app_meta_data->>'provider' = 'github' then 'active' else 'pending' end)
+  values (new.id, login, case when github then coalesce(new.raw_user_meta_data->>'full_name', login) end,
+          first_admin, case when first_admin then 'active' else 'pending' end)
   on conflict (user_id) do nothing;
   return new;
 end; $$;
@@ -315,6 +324,10 @@ begin
   select id into new_id from public.proposals where proposer = uid and status = 'pending'
     and kind = p_kind and athlete_id is not distinct from p_athlete and payload = p_payload limit 1;
   if found then return new_id; end if;
+  -- One My PRs form sends about ten requests; the cap keeps an account from flooding the queue.
+  if (select count(*) from public.proposals where proposer = uid and status = 'pending') >= 30 then
+    raise exception 'you already have 30 requests waiting; wait for a review or withdraw some';
+  end if;
   insert into public.proposals(kind, approval, athlete_id, proposer, payload)
     values (p_kind, appr, p_athlete, uid, p_payload) returning id into new_id;
   return new_id;
@@ -347,7 +360,9 @@ begin
   end if;
 
   -- Also refuses requests whose proposer's account was deleted; those can only be rejected.
-  select * into proposer_profile from public.profiles where user_id = pr.proposer for update;
+  -- "No key" still serializes changes to the proposer's link and status, without blocking the
+  -- foreign-key checks of another decision (two members verifying each other could deadlock).
+  select * into proposer_profile from public.profiles where user_id = pr.proposer for no key update;
   if not found or proposer_profile.status = 'blocked' then raise exception 'proposer is unavailable or blocked'; end if;
   if pr.kind in ('claim','new_athlete') and proposer_profile.athlete_id is not null then
     raise exception 'proposer is already linked to an athlete';
@@ -401,9 +416,7 @@ begin
   elsif pr.kind = 'new_athlete' then
     insert into public.athletes(name) values (pr.payload->>'name') returning id into new_ath;
     update public.proposals set athlete_id = new_ath where id = pr.id;
-    if (select athlete_id from public.profiles where user_id = pr.proposer) is null then
-      update public.profiles set athlete_id = new_ath, status='active' where user_id = pr.proposer;
-    end if;
+    update public.profiles set athlete_id = new_ath, status='active' where user_id = pr.proposer;
   elsif pr.kind = 'claim' then
     if exists (select 1 from public.profiles where athlete_id = pr.athlete_id and user_id <> pr.proposer) then
       raise exception 'that athlete is already claimed';
@@ -467,7 +480,8 @@ begin
 end; $$;
 
 -- Create (p_id null) or change one of your own plans. A plan starts at most two hours ago
--- ("I'm at the gym now, come along") and at most 60 days ahead.
+-- ("I'm at the gym now, come along") and at most 60 days ahead. A session that is over (two
+-- hours after its start) can no longer be changed.
 create or replace function public.save_plan(p_id uuid, p_starts_at timestamptz, p_activity text, p_note text)
 returns uuid language plpgsql security definer set search_path = public as $$
 declare uid uuid := auth.uid(); prof public.profiles; plan public.plans; what text := btrim(p_activity);
@@ -494,7 +508,8 @@ begin
     select id into new_id from public.plans
       where owner = uid and starts_at = p_starts_at and activity = what and note is not distinct from remark limit 1;
     if found then return new_id; end if;
-    if (select count(*) from public.plans where owner = uid and starts_at > now()) >= 20 then
+    -- Sessions still open count too, so starting them just now is no way around the limit.
+    if (select count(*) from public.plans where owner = uid and starts_at > now() - interval '2 hours') >= 20 then
       raise exception 'you already have 20 upcoming plans';
     end if;
     insert into public.plans(owner, starts_at, activity, note) values (uid, p_starts_at, what, remark)
@@ -505,9 +520,13 @@ begin
   select * into plan from public.plans where id = p_id for update;
   if not found then raise exception 'plan not found'; end if;
   if plan.owner <> uid then raise exception 'you can only change your own plans'; end if;
+  -- It stays where it was, with the people who came; otherwise they would move with it.
+  if plan.starts_at < now() - interval '2 hours' then raise exception 'this session is over; plan a new one'; end if;
   update public.plans set starts_at = p_starts_at, activity = what, note = remark, updated_at = now() where id = p_id;
-  -- Moving a session moves everyone's arrival with it.
-  update public.plan_joins set arrives_at = arrives_at + (p_starts_at - plan.starts_at) where plan_id = p_id;
+  -- Moving a session moves everyone's arrival with it, by the seconds between the two starts
+  -- (an interval in days would shift people across a daylight saving change outside UTC).
+  update public.plan_joins set arrives_at = arrives_at + make_interval(secs => extract(epoch from p_starts_at - plan.starts_at))
+    where plan_id = p_id;
   return p_id;
 end; $$;
 
@@ -530,6 +549,7 @@ end; $$;
 
 -- Join (p_join true) someone else's plan, coming at p_arrives_at (null: at its start) within six
 -- hours of its start, or change that time; or leave it. Joining closes two hours after the start.
+-- Leaving needs no spot on the board, so a member unlinked after joining can still step out.
 create or replace function public.join_plan(p_id uuid, p_join boolean, p_arrives_at timestamptz)
 returns void language plpgsql security definer set search_path = public as $$
 declare uid uuid := auth.uid(); prof public.profiles; plan public.plans; arrival timestamptz;
@@ -538,16 +558,16 @@ begin
   select * into prof from public.profiles where user_id = uid;
   if not found then raise exception 'no profile'; end if;
   if prof.status = 'blocked' then raise exception 'your account is blocked'; end if;
-  if not coalesce(prof.is_admin or (prof.status = 'active' and prof.athlete_id is not null), false) then
-    raise exception 'claim your spot on the board before joining sessions';
-  end if;
   if p_join is null then raise exception 'join must be true or false'; end if;
-  select * into plan from public.plans where id = p_id for share;
-  if not found then raise exception 'plan not found or already removed'; end if;
   if not p_join then
     delete from public.plan_joins where plan_id = p_id and user_id = uid;
     return;
   end if;
+  if not coalesce(prof.is_admin or (prof.status = 'active' and prof.athlete_id is not null), false) then
+    raise exception 'claim your spot on the board before joining sessions';
+  end if;
+  select * into plan from public.plans where id = p_id for share;
+  if not found then raise exception 'plan not found or already removed'; end if;
   if plan.owner = uid then raise exception 'this is your own plan'; end if;
   if plan.starts_at < now() - interval '2 hours' then raise exception 'this session is over'; end if;
   arrival := coalesce(p_arrives_at, plan.starts_at);
@@ -559,8 +579,9 @@ begin
 end; $$;
 
 -- Join (p_join true) a Friday's lift, coming at p_arrives_at on that Friday, or change that
--- time; or leave it. Fridays take joins from today up to 60 days ahead. The app checks the
--- local day; this allows a day's slack either side, since the database runs in UTC.
+-- time; or leave it (which needs no spot on the board). Fridays take joins from today up to 60
+-- days ahead. The app checks the local day; this allows a day's slack either side, since the
+-- database runs in UTC.
 create or replace function public.join_friday(p_day date, p_join boolean, p_arrives_at timestamptz)
 returns void language plpgsql security definer set search_path = public as $$
 declare uid uuid := auth.uid(); prof public.profiles;
@@ -569,17 +590,17 @@ begin
   select * into prof from public.profiles where user_id = uid;
   if not found then raise exception 'no profile'; end if;
   if prof.status = 'blocked' then raise exception 'your account is blocked'; end if;
-  if not coalesce(prof.is_admin or (prof.status = 'active' and prof.athlete_id is not null), false) then
-    raise exception 'claim your spot on the board before joining sessions';
-  end if;
   if p_join is null then raise exception 'join must be true or false'; end if;
   if p_day is null or extract(isodow from p_day) <> 5 then raise exception 'pick a Friday'; end if;
   if not p_join then
     delete from public.friday_joins where day = p_day and user_id = uid;
     return;
   end if;
+  if not coalesce(prof.is_admin or (prof.status = 'active' and prof.athlete_id is not null), false) then
+    raise exception 'claim your spot on the board before joining sessions';
+  end if;
   if p_day < current_date - 1 then raise exception 'that Friday has passed'; end if;
-  if p_day > current_date + 60 then raise exception 'Fridays can be joined at most 60 days ahead'; end if;
+  if p_day > current_date + 61 then raise exception 'Fridays can be joined at most 60 days ahead'; end if;
   if p_arrives_at is null or p_arrives_at not between p_day::timestamptz - interval '1 day'
                                                   and p_day::timestamptz + interval '2 days' then
     raise exception 'pick a time on that Friday';

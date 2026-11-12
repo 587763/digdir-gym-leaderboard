@@ -2,7 +2,7 @@
 // Governance: admins manage everything; signed-in users claim an athlete (admin
 // approves); linked users propose PR/achievement changes (peer-verified) and name
 // changes / new athletes (admin-approved). The database enforces every rule; this is UI.
-const { html, raw } = UI;
+const { html, raw, icon } = UI;
 const REFRESH_CHECK_MS = 60000;
 // A hung request must not freeze an unattended display: give up, show it, retry later.
 const READ_TIMEOUT_MS = 20000;
@@ -36,6 +36,7 @@ class LeaderboardApp {
     this.readTimeoutMs = READ_TIMEOUT_MS;
     this.tv = new TvDisplay(this);
     this.bodyweight = this.bodyweightPreference(); // ⚖️ Bodyweight ranking, opt-in per viewer
+    this.actions = this.actionMap();
     this.ready = this.init();
   }
 
@@ -58,8 +59,7 @@ class LeaderboardApp {
     UI.dialogs.setup();
     UI.dialogs.onChange((open) => (open ? this.tv.stop() : this.tv.restart()));
     this.applyBodyweight(this.bodyweight);
-    const linked = location.hash.slice(1);
-    if (document.getElementById(`${linked}-tab`)) this.switchTab(linked);
+    this.switchTab(this.linkedTab());
     this.reflectAuth();
     this.tv.apply(this.tv.enabled);
     if (!Store.configured) {
@@ -91,6 +91,11 @@ class LeaderboardApp {
       if (this.realtimeConnected) this.refreshAll();
     });
     await this.refreshAll();
+    // ?tabs=latest names a tab that is empty until its PRs are loaded: start there now.
+    if (this.tv.onlyTabs.length) this.tv.showRotationTab();
+    // Signing in returns to the bare page; go back to the view it started from (?tv&tabs=…, #total).
+    const view = Store.takeReturnView();
+    if (view && this.signedIn && view !== location.search + location.hash) location.replace(location.pathname + view);
     this.scheduleRefreshCheck();
     // Web fonts change text widths: re-measure the tab strip and TV pages once loaded.
     document.fonts?.ready.then(() => { this.revealActiveTab(); if (this.tv.enabled) this.tv.fit(); });
@@ -172,27 +177,29 @@ class LeaderboardApp {
   // re-renders once "just now" should read "5 minutes ago" or a 🔥 week runs out, while
   // truly unchanged refreshes still leave focused controls and open dialogs alone. So are
   // the date (the Friday lift and today's column) and which planned sessions started or ended.
+  // The planner's own view (its week, the session shown) is not: see redrawPlanner().
   boardSnapshot() {
     return JSON.stringify([this.user, this.profile, this.allAthletes, this.profiles,
       this.proposals, this.recentPrs, this.loading, !!this.loadError, this.bodyweight,
       this.latestPrs().map((item) => UI.timeAgo(item.at)), [...this.freshPrs().keys()],
-      this.proposals.map((p) => UI.timeAgo(p.created_at)), this.plans, this.fridayJoins, !!this.plansError, this.plannerWeek,
-      Planner.dayKey(new Date()), this.plans.map((p) => [Planner.isOpen(p), Date.parse(p.starts_at) <= Date.now()])]);
+      this.proposals.map((p) => UI.timeAgo(p.created_at)), this.plans, this.fridayJoins, !!this.plansError,
+      Planner.dayKey(new Date()), this.plans.map((p) => [Planner.isOpen(p), Planner.earliest(p) <= Date.now()])]);
   }
 
   // Verified improvements, newest first, joined to athletes still on the board.
-  latestPrs() {
+  improvements() {
     return this.recentPrs.map((p) => ({
       id: p.id, athlete: this.athleteById(p.athlete_id), lift: p.payload?.lift, at: p.decided_at,
       value: Number(p.payload?.value), previous: Number(p.payload?.previous_value ?? 0),
-    })).filter((item) => item.athlete && !item.athlete.archived_at && Lifts.get(item.lift) && Lifts.improves(item.lift, item.previous, item.value))
-      .slice(0, LATEST_LIMIT);
+    })).filter((item) => item.athlete && !item.athlete.archived_at && Lifts.get(item.lift) && Lifts.improves(item.lift, item.previous, item.value));
   }
+  // The newest of them, for the Latest feed and the TV's line.
+  latestPrs() { return this.improvements().slice(0, LATEST_LIMIT); }
 
   // "athleteId:liftId" → verified date, for recent PRs that are still the record.
   freshPrs(now = Date.now()) {
     const fresh = new Map();
-    for (const item of this.latestPrs()) {
+    for (const item of this.improvements()) {
       const key = `${item.athlete.id}:${item.lift}`;
       if (now - Date.parse(item.at) < FRESH_MS && Lifts.value(item.athlete, item.lift) === item.value && !fresh.has(key)) fresh.set(key, item.at);
     }
@@ -319,17 +326,16 @@ class LeaderboardApp {
     b.toggle('can-claim', this.signedIn && !this.isLinked && this.profile?.status !== 'blocked');
     b.toggle('can-review', this.signedIn && (this.isAdmin || this.isActive));
 
-    const area = document.getElementById('authArea');
-    if (!this.signedIn) {
-      area.innerHTML = html`<button type="button" id="signInBtn" class="btn btn-primary" data-action="sign-in"${!Store.configured && raw(' disabled')}>Sign in with GitHub</button>`;
-      return;
-    }
     const name = Store.userLabel(this.user);
-    const badge = this.isAdmin ? html`<span class="auth-user">🛡️ ${name} · admin</span>`
-      : this.isActive ? html`<span class="auth-user">🏋️ ${name}</span>`
-      : this.profile?.status === 'blocked' ? html`<span class="auth-user view-only">${name} · blocked</span>`
-      : html`<span class="auth-user view-only" title="Claim an athlete and wait for an admin to approve">⏳ ${name} · awaiting a spot</span>`;
-    area.innerHTML = html`${badge}<button type="button" id="signOutBtn" class="btn btn-ghost" data-action="sign-out">Sign out</button>`;
+    const markup = String(!this.signedIn
+      ? html`<button type="button" id="signInBtn" class="btn btn-primary" data-action="sign-in"${!Store.configured && raw(' disabled')}>Sign in with GitHub</button>`
+      : html`${this.isAdmin ? html`<span class="auth-user">🛡️ ${name} · admin</span>`
+        : this.isActive ? html`<span class="auth-user">🏋️ ${name}</span>`
+        : this.profile?.status === 'blocked' ? html`<span class="auth-user view-only">${name} · blocked</span>`
+        : html`<span class="auth-user view-only" title="Claim an athlete and wait for an admin to approve">⏳ ${name} · awaiting a spot</span>`
+      }<button type="button" id="signOutBtn" class="btn btn-ghost" data-action="sign-out">Sign out</button>`);
+    // Rewritten only when it changes, so a refresh never takes focus from these buttons.
+    UI.setHtml(document.getElementById('authArea'), markup);
   }
 
   renderWelcomeBack() {
@@ -337,8 +343,8 @@ class LeaderboardApp {
     const a = this.athleteById(this.myAthleteId);
     banner.hidden = !(this.signedIn && a?.archived_at && this.profile?.status !== 'blocked');
     if (banner.hidden) return;
-    banner.innerHTML = html`<p><strong>👋 Welcome back, ${a.name}!</strong> Your athlete is archived, so you're not on the boards right now. Your records and verified history are all still here.</p>
-      <button type="button" class="btn btn-primary" data-action="restore-mine">Bring my athlete back</button>`;
+    UI.setHtml(banner, html`<p><strong>👋 Welcome back, ${a.name}!</strong> Your athlete is archived, so you're not on the boards right now. Your records and verified history are all still here.</p>
+      <button type="button" class="btn btn-primary" data-action="restore-mine">Bring my athlete back</button>`);
   }
 
   async restoreMine() {
@@ -389,7 +395,7 @@ class LeaderboardApp {
     window.addEventListener('focus', () => this.refreshAll());
     window.addEventListener('online', () => this.refreshAll());
     window.addEventListener('hashchange', () => {
-      const tab = location.hash.slice(1);
+      const tab = this.linkedTab();
       if (document.getElementById(`${tab}-tab`) && tab !== this.activeTab) { this.switchTab(tab); this.tv.restart(); }
     });
     // Re-fit TV pagination when the screen size changes (e.g. the TV reconnects).
@@ -402,7 +408,8 @@ class LeaderboardApp {
   }
 
   // One delegated action map for static and generated controls: no inline handlers.
-  get actions() {
+  // Each action gets the control's data-id and the control.
+  actionMap() {
     return {
       'sign-in': () => Store.signIn(),
       'sign-out': () => Store.signOut(),
@@ -460,6 +467,8 @@ class LeaderboardApp {
 
   // Runs an action once at a time, marks its control busy while async work is
   // pending and reports failures. Synchronous openers keep focus on their trigger.
+  // Busy is aria-busy and aria-disabled, never `disabled`: a disabled control drops keyboard
+  // focus to the page, and the guard here already stops a second run.
   async runAction(key, control, action) {
     if (this.busyActions.has(key)) return;
     this.busyActions.add(key);
@@ -468,14 +477,14 @@ class LeaderboardApp {
       const result = action();
       if (result && typeof result.then === 'function') {
         busy = !!control;
-        if (busy) { control.disabled = true; control.setAttribute('aria-busy', 'true'); }
+        if (busy) { control.setAttribute('aria-busy', 'true'); control.setAttribute('aria-disabled', 'true'); }
         await result;
       }
     } catch (error) {
       UI.toast(this.errText(error), 'error');
     } finally {
       this.busyActions.delete(key);
-      if (busy) { control.disabled = false; control.removeAttribute('aria-busy'); }
+      if (busy) { control.removeAttribute('aria-busy'); control.removeAttribute('aria-disabled'); }
     }
   }
 
@@ -496,6 +505,9 @@ class LeaderboardApp {
   }
 
   // --- tabs -----------------------------------------------------------------
+  // The tab a link names: #total, or #total-tab once the skip link has been followed.
+  linkedTab() { return location.hash.slice(1).replace(/-tab$/, ''); }
+
   // remember: a visitor's choice becomes the URL hash, so board links can be shared.
   switchTab(tab, { remember = false } = {}) {
     if (!document.getElementById(`${tab}-tab`)) return;
@@ -517,11 +529,7 @@ class LeaderboardApp {
   // ⚖️ Bodyweight ranking swaps the boards for their bodyweight versions (see js/lifts.js).
   // Each viewer opts in, so a TV only ranks by bodyweight when it was turned on in that
   // browser or by ?bodyweight.
-  bodyweightPreference(params = new URLSearchParams(location.search)) {
-    let saved = false;
-    try { saved = localStorage.getItem('lb.bodyweight') === '1'; } catch { /* Storage may be disabled. */ }
-    return saved || params.has('bodyweight');
-  }
+  bodyweightPreference() { return UI.stored.get('lb.bodyweight') === '1' || UI.hasParam('bodyweight'); }
 
   // The next render draws the boards in this mode.
   applyBodyweight(on) {
@@ -532,11 +540,8 @@ class LeaderboardApp {
 
   toggleBodyweight() {
     const on = !this.bodyweight;
-    try { localStorage.setItem('lb.bodyweight', on ? '1' : '0'); } catch { /* private mode */ }
-    // Keep the URL honest so a reload or a shared link matches what's on screen.
-    const url = new URL(location.href);
-    if (on) url.searchParams.set('bodyweight', '1'); else url.searchParams.delete('bodyweight');
-    history.replaceState(null, '', url);
+    UI.stored.set('lb.bodyweight', on ? '1' : '0');
+    UI.setParam('bodyweight', on);
     this.applyBodyweight(on);
     this.render();
   }
@@ -553,7 +558,7 @@ class LeaderboardApp {
   // --- forms: fields from the registries --------------------------------------
   buildForms() {
     // Computed achievements come from the records, so there is nothing to claim.
-    const checks = (cls) => html`${window.ACHIEVEMENTS.filter((a) => !a.earned).map((a) => html`<label class="form-check"><input type="checkbox" class="${cls}" value="${a.id}"><span><span aria-hidden="true">${a.emoji}</span> ${a.name}</span></label>`)}`;
+    const checks = (cls) => html`${window.ACHIEVEMENTS.filter((a) => !a.earned).map((a) => html`<label class="form-check"><input type="checkbox" class="${cls}" value="${a.id}"><span>${icon(a.emoji)} ${a.name}</span></label>`)}`;
     document.getElementById('achievementFields').innerHTML = checks('achievement-check');
     document.getElementById('mineAchievementFields').innerHTML = checks('mine-achievement-check');
     document.getElementById('mineLiftFields').innerHTML = this.liftFields('mine');
@@ -567,15 +572,17 @@ class LeaderboardApp {
 
   // One fieldset per board group; each input is named after its exercise id.
   liftFields(prefix) {
+    // A time field has a hint line under it; its neighbours get an empty one to stay level.
+    const spacer = (group) => Lifts.inGroup(group).some((e) => e.unit === 'time') && raw('<span class="field-hint"></span>');
     return html`${Lifts.groups.filter((g) => Lifts.inGroup(g.id).length).map((g) => html`
       <fieldset class="lift-fields">
-        <legend class="form-section-title"><span aria-hidden="true">${g.emoji}</span> ${g.label}</legend>
+        <legend class="form-section-title">${icon(g.emoji)} ${g.label}</legend>
         <div class="form-grid">${Lifts.inGroup(g.id).map((e) => html`
           <div class="form-group">
-            <label for="${prefix}-${e.id}"><span aria-hidden="true">${e.emoji}</span> ${e.label} <span class="unit">(${Lifts.unitHint(e.id)})</span></label>
+            <label for="${prefix}-${e.id}">${icon(e.emoji)} ${e.label} <span class="unit">(${Lifts.unitHint(e.id)})</span></label>
             ${e.unit === 'time'
               ? html`<input type="text" id="${prefix}-${e.id}" class="time-input" inputmode="decimal" autocomplete="off" placeholder="m:ss" pattern="[0-9]+([:.,][0-5][0-9])?" title="Minutes and seconds, like 1:30" aria-describedby="${prefix}-${e.id}-hint"><span class="field-hint" id="${prefix}-${e.id}-hint" aria-live="polite"></span>`
-              : html`<input type="number" id="${prefix}-${e.id}" min="0" max="${Lifts.MAX}" step="${e.unit === 'kg' ? '0.1' : '1'}" inputmode="${e.unit === 'kg' ? 'decimal' : 'numeric'}" placeholder="0"><span class="field-hint"></span>`}
+              : html`<input type="number" id="${prefix}-${e.id}" min="0" max="${Lifts.MAX}" step="${e.unit === 'kg' ? '0.1' : '1'}" inputmode="${e.unit === 'kg' ? 'decimal' : 'numeric'}" placeholder="0">${spacer(g.id)}`}
           </div>`)}
         </div>
       </fieldset>`)}`;
@@ -585,7 +592,7 @@ class LeaderboardApp {
   bodyweightField(id, note) {
     const { MIN, MAX } = Lifts.BODYWEIGHT;
     return html`<fieldset class="lift-fields">
-        <legend class="form-section-title"><span aria-hidden="true">⚖️</span> Bodyweight</legend>
+        <legend class="form-section-title">${icon('⚖️')} Bodyweight</legend>
         <div class="form-grid">
           <div class="form-group">
             <label for="${id}">Bodyweight <span class="unit">(kg)</span></label>
@@ -649,11 +656,11 @@ class LeaderboardApp {
     const el = document.getElementById(containerId);
     const mine = this.ownRequests(kinds);
     el.hidden = mine.length === 0;
-    el.innerHTML = html`<h3 class="form-section-title">⏳ Waiting for approval</h3>
+    UI.setHtml(el, html`<h3 class="form-section-title">⏳ Waiting for approval</h3>
       <ul class="request-list">${mine.map((p) => html`<li>
         <span>${this.describeRequest(p)}</span>
         <button type="button" class="btn btn-ghost btn-small" data-action="withdraw" data-id="${p.id}" aria-label="Withdraw ${this.requestLabel(p)}">Withdraw</button>
-      </li>`)}</ul>`;
+      </li>`)}</ul>`);
   }
 
   // --- claim ------------------------------------------------------------------
@@ -670,6 +677,7 @@ class LeaderboardApp {
     document.getElementById('claimNewName').value = '';
     this.renderOwnRequests('claimPending', ['claim', 'new_athlete']);
     UI.dialogs.open('claimModal');
+    if (select.disabled) document.getElementById('claimNewName').focus(); // the only way in
   }
 
   async submitClaim() {
@@ -758,10 +766,13 @@ class LeaderboardApp {
     UI.dialogs.open('reviewModal');
   }
 
+  // Whom a request is about: the athlete, or the name it asks for.
+  requestName(p) { return this.athleteById(p.athlete_id)?.name || p.payload?.name || 'an athlete'; }
+
   // What a request changes, e.g. "Daniel: Bench Press 136.0 → 145.0 kg (+9.0 kg)".
   describeRequest(p) {
     const athlete = this.athleteById(p.athlete_id);
-    const name = athlete?.name || p.payload?.name || 'an athlete';
+    const name = this.requestName(p);
     switch (p.kind) {
       case 'pr': {
         const lift = Lifts.get(p.payload.lift) || { emoji: '', label: p.payload.lift };
@@ -770,11 +781,11 @@ class LeaderboardApp {
         const delta = before != null && Number(before) > 0 && after > 0
           && html` <span class="delta ${Lifts.improves(p.payload.lift, before, after) ? 'up' : 'down'}">${Lifts.formatDelta(p.payload.lift, after - Number(before))}</span>`;
         const from = before != null && Number(before) > 0 && html`${Lifts.format(p.payload.lift, before)} → `;
-        return html`<strong>${name}</strong>: <span aria-hidden="true">${lift.emoji}</span> ${lift.label} ${from}<strong>${after > 0 ? Lifts.formatUnit(p.payload.lift, after) : 'clear entry'}</strong>${delta}`;
+        return html`<strong>${name}</strong>: ${icon(lift.emoji)} ${lift.label} ${from}<strong>${after > 0 ? Lifts.formatUnit(p.payload.lift, after) : 'clear entry'}</strong>${delta}`;
       }
       case 'achievement': {
         const ach = window.getAchievement(p.payload.achievement_id);
-        return html`<strong>${name}</strong>: ${p.payload.op === 'add' ? 'earn' : 'remove'} ${ach ? html`<span aria-hidden="true">${ach.emoji}</span> ${ach.name}` : p.payload.achievement_id}`;
+        return html`<strong>${name}</strong>: ${p.payload.op === 'add' ? 'earn' : 'remove'} ${ach ? html`${icon(ach.emoji)} ${ach.name}` : p.payload.achievement_id}`;
       }
       case 'rename': return html`<strong>${name}</strong>: rename to <strong>${p.payload.name}</strong>`;
       case 'new_athlete': return html`Add a new athlete: <strong>${p.payload.name}</strong>`;
@@ -785,7 +796,7 @@ class LeaderboardApp {
 
   // Plain words for a request, for control labels: "Approve Bench Press PR for Daniel".
   requestLabel(p) {
-    const name = this.athleteById(p.athlete_id)?.name || p.payload?.name || 'an athlete';
+    const name = this.requestName(p);
     switch (p.kind) {
       case 'pr': return `${Lifts.get(p.payload.lift)?.label || p.payload.lift} PR for ${name}`;
       case 'achievement': return `${window.getAchievement(p.payload.achievement_id)?.name || p.payload.achievement_id} for ${name}`;
@@ -807,29 +818,31 @@ class LeaderboardApp {
     const list = document.getElementById('reviewList');
     const items = this.reviewable().filter((p) => p.proposer !== this.user?.id);
     const own = this.ownRequests();
+    // Why a request can only be rejected, as [tag, tooltip]: its record changed since, its
+    // account is gone, or its athlete was archived (approving a claim restores the athlete).
+    const blocker = (p) => this.isStale(p) ? ['outdated — reject it and submit again', 'The record changed after this was submitted']
+      : !p.proposer ? ['account deleted — it can only be rejected', 'A request left by a deleted account cannot be approved']
+      : p.kind !== 'claim' && this.athleteById(p.athlete_id)?.archived_at ? ['athlete archived — restore them first', 'An archived athlete takes no changes until restored']
+      : null;
     const row = (p, actions) => {
       const who = this.profileByUser(p.proposer)?.github_login;
-      const stale = this.isStale(p);
+      const blocked = blocker(p);
       return html`<div class="review-row">
         <div class="review-desc">
           <span class="tag ${p.approval === 'peer' ? 'tag-peer' : 'tag-admin'}">${p.approval === 'peer' ? 'peer' : 'admin'}</span>
           ${this.describeRequest(p)}
           <span class="by">· ${who ? `@${who}` : p.proposer ? 'someone' : 'a former member'}${p.created_at && ` · ${UI.timeAgo(p.created_at)}`}</span>
-          ${stale && html`<span class="tag tag-warn" title="The record changed after this was submitted">outdated — reject it and submit again</span>`}
+          ${blocked && html`<span class="tag tag-warn" title="${blocked[1]}">${blocked[0]}</span>`}
         </div>
-        <div class="review-actions">${actions(stale)}</div>
+        <div class="review-actions">${actions(blocked)}</div>
       </div>`;
     };
     const approve = (p) => html`<button type="button" class="btn btn-edit" data-action="approve" data-id="${p.id}" aria-label="Approve ${this.requestLabel(p)}">Approve</button>`;
-    const decide = (p) => (stale) => html`${!stale && approve(p)}<button type="button" class="btn btn-danger" data-action="reject" data-id="${p.id}" aria-label="Reject ${this.requestLabel(p)}">Reject</button>`;
-    const retract = (p) => () => html`${this.isAdmin && approve(p)}<button type="button" class="btn btn-ghost" data-action="withdraw" data-id="${p.id}" aria-label="Withdraw ${this.requestLabel(p)}">Withdraw</button>`;
-    if (items.length === 0 && own.length === 0) {
-      list.innerHTML = html`<p class="empty-state">Nothing to review right now. 🎉</p>`;
-      return;
-    }
-    list.innerHTML = html`
+    const decide = (p) => (blocked) => html`${!blocked && approve(p)}<button type="button" class="btn btn-danger" data-action="reject" data-id="${p.id}" aria-label="Reject ${this.requestLabel(p)}">Reject</button>`;
+    const retract = (p) => (blocked) => html`${this.isAdmin && !blocked && approve(p)}<button type="button" class="btn btn-ghost" data-action="withdraw" data-id="${p.id}" aria-label="Withdraw ${this.requestLabel(p)}">Withdraw</button>`;
+    UI.setHtml(list, items.length === 0 && own.length === 0 ? html`<p class="empty-state">Nothing to review right now. 🎉</p>` : html`
       ${items.length > 0 && html`<h3 class="form-section-title">To review</h3>${items.map((p) => row(p, decide(p)))}`}
-      ${own.length > 0 && html`<h3 class="form-section-title">Your requests</h3>${own.map((p) => row(p, retract(p)))}`}`;
+      ${own.length > 0 && html`<h3 class="form-section-title">Your requests</h3>${own.map((p) => row(p, retract(p)))}`}`);
   }
 
   async decide(id, approve) {
@@ -845,18 +858,21 @@ class LeaderboardApp {
     UI.dialogs.open('adminModal');
   }
 
-  renderMembers() {
+  // force: redraw even if nothing changed, to put a control back to its saved state.
+  renderMembers(force = false) {
     const list = document.getElementById('usersList');
-    if (this.profiles.length === 0) { list.innerHTML = html`<p class="empty-state">No members yet.</p>`; return; }
+    if (this.profiles.length === 0) { UI.setHtml(list, html`<p class="empty-state">No members yet.</p>`); return; }
     const order = { pending: 0, active: 1, blocked: 2 };
     const sorted = [...this.profiles].sort((a, b) => (order[a.status] ?? 3) - (order[b.status] ?? 3)
       || (a.github_login || '').localeCompare(b.github_login || ''));
-    list.innerHTML = html`${sorted.map((p) => {
+    const roster = [...this.allAthletes].sort((a, b) => a.name.localeCompare(b.name));
+    UI.setHtml(list, html`${sorted.map((p) => {
       const self = p.user_id === this.user?.id;
       const linked = this.athleteById(p.athlete_id);
       const asks = this.proposals.filter((q) => q.proposer === p.user_id && ['claim', 'new_athlete'].includes(q.kind));
-      const login = p.github_login || p.user_id;
-      const options = [...this.allAthletes].sort((a, b) => a.name.localeCompare(b.name)).map((a) => {
+      // Only GitHub sign-ins carry a login; any other account is one nobody can vouch for.
+      const login = p.github_login || `account ${String(p.user_id).slice(0, 8)}`;
+      const options = roster.map((a) => {
         const takenBy = this.ownerOf(a.id);
         const taken = takenBy && takenBy.user_id !== p.user_id;
         return html`<option value="${a.id}"${a.id === p.athlete_id && raw(' selected')}${taken && raw(' disabled')}>${a.name}${a.archived_at && ' (archived)'}${taken && ' (claimed)'}</option>`;
@@ -864,7 +880,7 @@ class LeaderboardApp {
       const selfNote = self && raw(' disabled title="You can\'t change your own admin access or block yourself"');
       return html`<div class="user-row">
         <div class="user-info">
-          <strong>${login}</strong>${self && html` <span class="status-chip status-self">you</span>`}
+          <strong>${login}</strong>${!p.github_login && html` <span class="tag tag-warn" title="This account did not sign in with GitHub, so its owner is unknown">no GitHub login</span>`}${self && html` <span class="status-chip status-self">you</span>`}
           <span class="status-chip status-${p.status}">${p.status}</span>
           ${p.is_admin && html`<span class="status-chip status-admin">admin</span>`}
           ${linked && html`<span class="linked-to">→ ${linked.name}${linked.archived_at && ' (archived)'}</span>`}
@@ -876,7 +892,7 @@ class LeaderboardApp {
           <button type="button" class="btn btn-ghost" data-action="block" data-id="${p.user_id}" data-blocked="${p.status === 'blocked'}" aria-label="${p.status === 'blocked' ? 'Unblock' : 'Block'} ${login}"${selfNote}>${p.status === 'blocked' ? 'Unblock' : 'Block'}</button>
         </div>
       </div>`;
-    })}`;
+    })}`, { force });
   }
 
   // Member edits re-render on failure, so a control never shows an unsaved state.
@@ -884,7 +900,7 @@ class LeaderboardApp {
     try {
       await Store.adminUpdateProfile(userId, patch);
     } catch (error) {
-      UI.keepFocus(() => this.renderMembers());
+      UI.keepFocus(() => this.renderMembers(true));
       throw error;
     }
     await this.refreshAll();
@@ -911,11 +927,13 @@ class LeaderboardApp {
 
   renderAthletesList() {
     const container = document.getElementById('athletesList');
-    if (this.allAthletes.length === 0) { container.innerHTML = html`<p class="empty-state">No athletes yet.</p>`; return; }
+    if (this.allAthletes.length === 0) { UI.setHtml(container, html`<p class="empty-state">No athletes yet.</p>`); return; }
     const query = document.getElementById('athleteFilter').value.trim().toLocaleLowerCase();
     const shown = [...this.allAthletes].sort((a, b) => a.name.localeCompare(b.name))
       .filter((a) => !query || a.name.toLocaleLowerCase().includes(query));
-    if (shown.length === 0) { container.innerHTML = html`<p class="empty-state">No athlete matches “${query}”.</p>`; return; }
+    if (shown.length === 0) { UI.setHtml(container, html`<p class="empty-state">No athlete matches “${query}”.</p>`); return; }
+    // The archived section stays as the admin left it: restoring one athlete keeps it open.
+    const archivedOpen = query || container.querySelector('.archived-list')?.open;
     const pending = this.pendingAthletes();
     const card = (a) => {
       const owner = this.ownerOf(a.id);
@@ -928,18 +946,18 @@ class LeaderboardApp {
       return html`<div class="athlete-card${a.archived_at && ' archived'}">
         <div class="athlete-card-avatar">${raw(window.renderAvatar(a, 52, { decorative: true }))}</div>
         <div class="athlete-card-info">
-          <h3>${a.name}${BoardView.badges(a)}${pending.has(a.id) && raw('<span class="badge-chip pending" title="Has a pending change">⏳</span>')}${owner && html`<span class="linked-to">@${owner.github_login}</span>`}</h3>
-          <div class="athlete-stats">${stats.length ? stats.map((e) => html`<span title="${e.label}"><span aria-hidden="true">${e.emoji}</span> <strong>${Lifts.format(e.id, Lifts.value(a, e.id))}</strong></span>`) : html`<span>No records yet</span>`}</div>
+          <h3>${a.name}${BoardView.badges(a)}${pending.has(a.id) && BoardView.pendingChip}${owner && html`<span class="linked-to">@${owner.github_login}</span>`}</h3>
+          <div class="athlete-stats">${stats.length ? stats.map((e) => html`<span title="${e.label}">${icon(e.emoji)} <span class="visually-hidden">${e.label}</span> <strong>${Lifts.format(e.id, Lifts.value(a, e.id))}</strong></span>`) : html`<span>No records yet</span>`}</div>
         </div>
         <div class="athlete-card-actions">${actions}</div>
       </div>`;
     };
     const active = shown.filter((a) => !a.archived_at), archived = shown.filter((a) => a.archived_at);
-    container.innerHTML = html`${active.map(card)}${archived.length > 0 && html`
-      <details class="archived-list"${query && raw(' open')}>
+    UI.setHtml(container, html`${active.map(card)}${archived.length > 0 && html`
+      <details class="archived-list"${archivedOpen && raw(' open')}>
         <summary>Archived (${archived.length}) · off the boards, records and history kept</summary>
         ${archived.map(card)}
-      </details>`}`;
+      </details>`}`);
   }
 
   // Archiving is reversible and keeps records and history; members linked to an
@@ -1019,6 +1037,10 @@ class LeaderboardApp {
     }
   }
 
+  // The planner's own view (which week, which session) changes without the boards: its
+  // controls redraw the note and the planner alone.
+  redrawPlanner() { UI.keepFocus(() => this.renderPlanner()); }
+
   plannerContext(now = new Date()) {
     return {
       now, week: this.plannerWeek, plans: this.plans, fridayJoins: this.fridayJoins, loading: this.loading, error: !!this.plansError,
@@ -1036,13 +1058,19 @@ class LeaderboardApp {
 
   // A planned session, or a Friday's lift ("friday-YYYY-MM-DD") with who joins it.
   planById(id) { return Planner.planById(id, this.plans, this.fridayJoins); }
+  // The same for a control that acts on it: an error when it was removed meanwhile.
+  plannedSession(id) {
+    const plan = this.planById(id);
+    if (!plan) throw new Error('This session is no longer planned.');
+    return plan;
+  }
 
   // The Friday note opens the planner on the week of the coming Friday, or straight on the
   // session clicked.
   openPlanner(planId = null) {
     this.plannerWeek = Planner.defaultWeek();
     this.showPlannerView('week', { focus: false });
-    this.render();
+    this.redrawPlanner();
     UI.dialogs.open('plannerModal');
     if (planId) this.openSession(planId);
   }
@@ -1074,12 +1102,11 @@ class LeaderboardApp {
 
   // One session: who comes when, and (for others' open sessions) the time you'll come.
   openSession(planId) {
-    const plan = this.planById(planId);
-    if (!plan) throw new Error('This session is no longer planned.');
+    const plan = this.plannedSession(planId);
     if (!UI.dialogs.isOpen('plannerModal')) this.openPlanner();
     this.plannerWeek = Planner.weekOf(new Date(plan.starts_at)); // Back shows its week
     this.viewingPlan = plan.id;
-    this.render();
+    this.redrawPlanner();
     // Your time, else the host's start; on a Friday's lift the earliest arrival, or blank to pick.
     const suggested = Planner.arrivalOf(plan, this.user?.id) ?? (plan.friday ? Planner.arrivals(plan)[0]?.at : plan.starts_at);
     document.getElementById('joinTime').value = suggested == null ? '' : Planner.timeValue(suggested);
@@ -1104,14 +1131,13 @@ class LeaderboardApp {
 
   stepPlannerWeek(step) {
     this.plannerWeek = Planner.clampWeek(this.plannerWeek + step);
-    this.render();
+    this.redrawPlanner();
   }
 
   // A new plan starts on the given day, or the first day of the shown week that hasn't passed.
   openPlanEditor(planId = null, day = null) {
     if (!this.canPlan) return UI.toast('Claim your spot on the board to plan sessions', 'error');
-    const plan = planId ? this.planById(planId) : null;
-    if (planId && !plan) throw new Error('This session is no longer planned.');
+    const plan = planId ? this.plannedSession(planId) : null;
     if (plan && plan.owner !== this.user?.id) throw new Error('You can only change your own sessions.');
     if (!UI.dialogs.isOpen('plannerModal')) this.openPlanner();
     else this.showPlannerView('week', { focus: false });
@@ -1152,13 +1178,13 @@ class LeaderboardApp {
     await Store.savePlan(editing, plan.startsAt, plan.activity, plan.note);
     this.plannerWeek = Planner.weekOf(new Date(plan.startsAt));
     await this.refreshAll();
+    this.redrawPlanner();
     this.showPlannerView('week');
     UI.toast(editing ? 'Session updated' : 'Session planned. Others can join you now.', 'success');
   }
 
   async deletePlan(id) {
-    const plan = this.planById(id);
-    if (!plan) throw new Error('This session is no longer planned.');
+    const plan = this.plannedSession(id);
     const mine = plan.owner === this.user?.id;
     const going = Planner.joiners(plan).length;
     const what = `${mine ? 'your' : `${this.memberOf(plan.owner).name}'s`} ${plan.activity} session on ${Planner.formatDay(new Date(plan.starts_at))} at ${Planner.formatTime(plan.starts_at)}`;
@@ -1169,8 +1195,7 @@ class LeaderboardApp {
   }
 
   async submitJoin() {
-    const plan = this.planById(this.viewingPlan);
-    if (!plan) throw new Error('This session is no longer planned.');
+    const plan = this.plannedSession(this.viewingPlan);
     const joined = Planner.arrivalOf(plan, this.user?.id) != null;
     const arrivesAt = Planner.readArrival(plan, document.getElementById('joinTime').value);
     if (plan.friday) await Store.joinFriday(plan.friday, true, arrivesAt);
@@ -1200,13 +1225,11 @@ class LeaderboardApp {
         <ul>${release.changes.map((change) => html`<li>${change}</li>`)}</ul>
       </section>`)}`;
     document.getElementById('changelogVersion').textContent = latest.version;
-    let seen = null;
-    try { seen = localStorage.getItem('lb.changelog'); } catch { /* Storage may be disabled. */ }
-    document.getElementById('changelogBtn').classList.toggle('unseen', seen !== latest.version);
+    document.getElementById('changelogBtn').classList.toggle('unseen', UI.stored.get('lb.changelog') !== latest.version);
   }
 
   openChangelog() {
-    try { localStorage.setItem('lb.changelog', window.CHANGELOG[0].version); } catch { /* private mode */ }
+    UI.stored.set('lb.changelog', window.CHANGELOG[0].version);
     document.getElementById('changelogBtn').classList.remove('unseen');
     UI.dialogs.open('changelogModal');
   }
@@ -1218,7 +1241,7 @@ class LeaderboardApp {
     if (!a) return;
     this.historyAthleteId = athleteId;
     document.getElementById('historyTitle').textContent = `📈 ${a.name} — progression`;
-    document.getElementById('historyBody').innerHTML = html`<p class="empty-state">Loading…</p>`;
+    UI.setHtml(document.getElementById('historyBody'), html`<p class="empty-state">Loading…</p>`);
     UI.dialogs.open('historyModal');
     this.reloadHistory();
   }
@@ -1232,9 +1255,9 @@ class LeaderboardApp {
     const current = () => request === this.historyRequest && this.historyAthleteId === id && UI.dialogs.isOpen('historyModal');
     try {
       const rows = await Store.listAthleteHistory(id);
-      if (current()) body.innerHTML = HistoryView.render(rows, this.athleteById(id));
+      if (current()) UI.setHtml(body, HistoryView.render(rows, this.athleteById(id)));
     } catch (error) {
-      if (current()) body.innerHTML = html`<p class="empty-state">${this.errText(error)}</p>`;
+      if (current()) UI.setHtml(body, html`<p class="empty-state">${this.errText(error)}</p>`);
     }
   }
 

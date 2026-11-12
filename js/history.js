@@ -1,8 +1,6 @@
 // Pure progression rendering. Approved PR proposals are the source of history.
 window.HistoryView = (() => {
-  const { html } = UI;
-
-  const { formatDate } = UI;
+  const { html, icon, formatDate } = UI;
 
   // Hand-rolled inline SVG line chart. Uniform scaling (no preserveAspectRatio
   // tricks) so dots stay round; #squiggle gives it the whiteboard look. Better is
@@ -41,7 +39,7 @@ window.HistoryView = (() => {
       : latest.value === 0 && html`<p class="history-note">Entry cleared on ${formatDate(latest.at)}.</p>`;
     return html`<div class="history-lift">
       <div class="history-lift-head">
-        <h3><span aria-hidden="true">${meta.emoji}</span> ${meta.label}</h3>
+        <h3>${icon(meta.emoji)} ${meta.label}</h3>
         ${head}
       </div>
       ${series.length > 0 && html`${sparkline(lid, series)}

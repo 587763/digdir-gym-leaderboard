@@ -4,11 +4,7 @@
 
 (function () {
   const cfg = window.LEADERBOARD_CONFIG || {};
-  const hasConfig =
-    cfg.SUPABASE_URL &&
-    cfg.SUPABASE_ANON_KEY &&
-    !cfg.SUPABASE_URL.includes('YOUR_PROJECT_REF') &&
-    !cfg.SUPABASE_ANON_KEY.includes('YOUR_ANON');
+  const hasConfig = !!(cfg.SUPABASE_URL && cfg.SUPABASE_ANON_KEY);
 
   let client = null;
   let connectionError = null;
@@ -24,7 +20,7 @@
 
   // Explicit columns: the live table also carries legacy fields the app never reads.
   const ATHLETE_COLUMNS = 'id, name, bench, squat, deadlift, lifts, achievements, bodyweight, archived_at, updated_at';
-  const PROFILE_COLUMNS = 'user_id, github_login, display_name, is_admin, status, athlete_id';
+  const PROFILE_COLUMNS = 'user_id, github_login, is_admin, status, athlete_id';
   const PROPOSAL_COLUMNS = 'id, kind, approval, athlete_id, proposer, payload, status, created_at';
   const PLAN_COLUMNS = 'id, owner, starts_at, activity, note, plan_joins(user_id, arrives_at, created_at)';
   const FRIDAY_JOIN_COLUMNS = 'day, user_id, arrives_at, created_at';
@@ -38,6 +34,17 @@
     if (error) throw error;
     return data;
   };
+  // Calls a database function: resolves to what it returns, throws what it raises.
+  const call = (name, args) => rows(connected().rpc(name, args));
+  // The one row an admin write touched. It is selected so that a write RLS refused, or a row
+  // that is gone, cannot look successful: that comes back as "no rows" (PGRST116).
+  const one = async (query, gone = 'That changed or your access expired. Reload and try again.') => {
+    const { data, error } = await query.single();
+    if (error?.code === 'PGRST116') throw new Error(gone);
+    if (error) throw error;
+    return data;
+  };
+  const RETURN_KEY = 'lb.return'; // the view to go back to after signing in
 
   window.Store = {
     configured: !!client,
@@ -57,12 +64,24 @@
       return m.user_name || m.preferred_username || m.full_name || m.name || user.email || 'signed in';
     },
 
+    // GitHub returns to the bare page (the only address Supabase allows), so the view the
+    // visitor was on (?tv&tabs=…, #total) is kept for takeReturnView().
     async signIn() {
+      try { sessionStorage.setItem(RETURN_KEY, window.location.search + window.location.hash); } catch { /* not remembered */ }
       const { error } = await connected().auth.signInWithOAuth({
         provider: 'github',
         options: { redirectTo: window.location.origin + window.location.pathname },
       });
       if (error) throw error;
+    },
+
+    // The view sign-in left behind, handed out once; "" when there is none.
+    takeReturnView() {
+      try {
+        const view = sessionStorage.getItem(RETURN_KEY) || '';
+        sessionStorage.removeItem(RETURN_KEY);
+        return view;
+      } catch { return ''; }
     },
 
     async signOut() {
@@ -104,8 +123,9 @@
       return rows(client.from('proposals').select(PROPOSAL_COLUMNS).eq('status', 'pending').order('created_at'));
     },
 
-    // Latest verified PRs across the board, newest first. Public through RLS (0004).
-    async listRecentPrs(limit = 20) {
+    // Latest verified PRs across the board, newest first. Public through RLS.
+    // Enough for the Latest feed and for 🔥 on every record of the past week.
+    async listRecentPrs(limit = 60) {
       if (!client) return [];
       return rows(client.from('proposals').select('id, athlete_id, payload, decided_at')
         .eq('kind', 'pr').eq('status', 'approved')
@@ -120,91 +140,59 @@
         .order('decided_at', { ascending: true }));
     },
 
-    // Planned sessions starting in [from, to), each with who joins it. Members only (0010):
-    // RLS returns no rows to visitors and to members not yet on the board.
+    // Planned sessions starting in [from, to), each with who joins it. Members only: RLS
+    // returns no rows to visitors and to members not yet on the board.
     async listPlans(from, to) {
       if (!client) return [];
       return rows(client.from('plans').select(PLAN_COLUMNS)
         .gte('starts_at', from).lt('starts_at', to).order('starts_at'));
     },
 
-    // Who joins the Friday lift on the Fridays from fromDay up to toDay (YYYY-MM-DD). Members only (0011).
+    // Who joins the Friday lift on the Fridays from fromDay up to toDay (YYYY-MM-DD). Members only.
     async listFridayJoins(fromDay, toDay) {
       if (!client) return [];
       return rows(client.from('friday_joins').select(FRIDAY_JOIN_COLUMNS).gte('day', fromDay).lt('day', toDay));
     },
 
-    // --- governed writes (RPCs enforce all the rules) -----------------------
-    async propose(kind, athleteId, payload) {
-      return rows(connected().rpc('propose', { p_kind: kind, p_athlete: athleteId, p_payload: payload || {} }));
-    },
+    // --- governed writes (the database functions enforce all the rules) -----
+    async propose(kind, athleteId, payload) { return call('propose', { p_kind: kind, p_athlete: athleteId, p_payload: payload || {} }); },
+    async decide(proposalId, approve) { await call('decide', { p_id: proposalId, p_approve: approve }); },
+    // The proposer retracts their own pending request.
+    async withdraw(proposalId) { await call('withdraw', { p_id: proposalId }); },
+    // A returning member puts their own archived athlete back on the boards.
+    async restoreMyAthlete() { await call('restore_my_athlete'); },
+    // A linked member shares, changes or clears (null) their own bodyweight, without review.
+    async setMyBodyweight(kg) { await call('set_my_bodyweight', { p_bodyweight: kg }); },
 
-    async decide(proposalId, approve) {
-      await rows(connected().rpc('decide', { p_id: proposalId, p_approve: approve }));
-    },
-
-    // The proposer retracts their own pending request (migration 0006).
-    async withdraw(proposalId) {
-      const { error } = await connected().rpc('withdraw', { p_id: proposalId });
-      if (error?.code === 'PGRST202') throw new Error('Withdrawing requests is not available yet. Ask an admin to reject it instead.');
-      if (error) throw error;
-    },
-
-    // A returning member puts their own archived athlete back on the boards (0007).
-    async restoreMyAthlete() {
-      const { error } = await connected().rpc('restore_my_athlete');
-      if (error?.code === 'PGRST202') throw new Error('Restoring is not available yet. Ask an admin to restore your athlete.');
-      if (error) throw error;
-    },
-
-    // A linked member shares, changes or clears (null) their own bodyweight, without review (0008).
-    async setMyBodyweight(kg) {
-      const { error } = await connected().rpc('set_my_bodyweight', { p_bodyweight: kg });
-      if (error) throw error;
-    },
-
-    // Planner (0010): create (id null) or change your own plan, remove it, join one (coming at
+    // Planner: create (id null) or change your own plan, remove it, join one (coming at
     // arrivesAt; joining again changes the time) or leave it.
-    async savePlan(id, startsAt, activity, note) {
-      return rows(connected().rpc('save_plan', { p_id: id, p_starts_at: startsAt, p_activity: activity, p_note: note }));
-    },
-    async deletePlan(id) {
-      const { error } = await connected().rpc('delete_plan', { p_id: id });
-      if (error) throw error;
-    },
-    async joinPlan(id, join, arrivesAt = null) {
-      const { error } = await connected().rpc('join_plan', { p_id: id, p_join: join, p_arrives_at: arrivesAt });
-      if (error) throw error;
-    },
-    // Join a Friday's lift (day: YYYY-MM-DD) coming at arrivesAt, change that time, or leave (0011).
-    async joinFriday(day, join, arrivesAt = null) {
-      const { error } = await connected().rpc('join_friday', { p_day: day, p_join: join, p_arrives_at: arrivesAt });
-      if (error) throw error;
-    },
+    async savePlan(id, startsAt, activity, note) { return call('save_plan', { p_id: id, p_starts_at: startsAt, p_activity: activity, p_note: note }); },
+    async deletePlan(id) { await call('delete_plan', { p_id: id }); },
+    async joinPlan(id, join, arrivesAt = null) { await call('join_plan', { p_id: id, p_join: join, p_arrives_at: arrivesAt }); },
+    // Join a Friday's lift (day: YYYY-MM-DD) coming at arrivesAt, change that time, or leave.
+    async joinFriday(day, join, arrivesAt = null) { await call('join_friday', { p_day: day, p_join: join, p_arrives_at: arrivesAt }); },
 
     // --- admin-only direct writes (RLS gates these to admins) ---------------
-    // Each selects the affected row, so an RLS-denied no-op cannot look successful.
     async adminUpdateProfile(userId, patch) {
-      await rows(connected().from('profiles').update(patch).eq('user_id', userId).select('user_id').single());
+      await one(connected().from('profiles').update(patch).eq('user_id', userId).select('user_id'));
     },
     async adminCreateAthlete(athlete) {
-      return rows(connected().from('athletes').insert(athlete).select(ATHLETE_COLUMNS).single());
+      return one(connected().from('athletes').insert(athlete).select(ATHLETE_COLUMNS));
     },
+    // expectedUpdatedAt: the version the editor opened, so a concurrent change is not overwritten.
     async adminUpdateAthlete(id, patch, expectedUpdatedAt) {
       let query = connected().from('athletes').update(patch).eq('id', id);
       if (expectedUpdatedAt) query = query.eq('updated_at', expectedUpdatedAt);
-      const { error } = await query.select('id').single();
-      if (error?.code === 'PGRST116') throw new Error('This athlete changed or your access expired. Reopen the editor and try again.');
-      if (error) throw error;
+      await one(query.select('id'), 'This athlete changed or your access expired. Reopen the editor and try again.');
     },
     // Archived athletes leave the boards but keep their records and verified history.
     async adminSetArchived(id, archived) {
-      await rows(connected().from('athletes').update({ archived_at: archived ? new Date().toISOString() : null })
-        .eq('id', id).select('id').single());
+      await one(connected().from('athletes').update({ archived_at: archived ? new Date().toISOString() : null })
+        .eq('id', id).select('id'));
     },
     // Permanent: also erases their proposals, including verified history (for erasure requests).
     async adminDeleteAthlete(id) {
-      await rows(connected().from('athletes').delete().eq('id', id).select('id').single());
+      await one(connected().from('athletes').delete().eq('id', id).select('id'));
     },
 
     // --- realtime -----------------------------------------------------------

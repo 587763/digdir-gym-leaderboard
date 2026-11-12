@@ -46,6 +46,17 @@ test('podium and table rows both show pending and fresh markers, and highlight t
   const [top, table] = podium.split('<table');
   assert.match(top, /data-id="a1"[^]*pending[^]*fresh/);
   assert.match(table, /class="is-me"[^]*data-id="a4"[^]*pending/);
+  // On a shared podium step only the member's own name is highlighted.
+  const tied = String(BoardView.section('bench', ctx([athlete('me', { bench: 100 }), athlete('rival', { bench: 100 })], { me: 'me' })));
+  assert.match(tied, /class="athlete-link is-me" data-action="history" data-id="me"/);
+  assert.match(tied, /class="athlete-link" data-action="history" data-id="rival"/);
+  assert.doesNotMatch(tied, /podium-spot[^"]*is-me/);
+  // Gold is read first; CSS draws the steps silver, gold, bronze.
+  assert.ok(podium.indexOf('podium-spot first') < podium.indexOf('podium-spot second'));
+  // The chips are named for screen readers, which would otherwise say "hourglass" and "fire".
+  assert.match(top, /role="img" aria-label="Has a pending change"/);
+  assert.match(top, /role="img" aria-label="New PR, verified just now"/);
+  assert.match(String(BoardView.badges(athlete('g', { achievements: ['gripper90kg'] }))), /role="img" aria-label="90kg Gripper Club"/);
 });
 
 test('latest feed renders improvements with their gain and an empty state', () => {
@@ -62,6 +73,10 @@ test('relative times read naturally', () => {
   assert.equal(UI.timeAgo('2026-09-29T12:00:00Z', now), 'yesterday');
   assert.equal(UI.timeAgo('2026-09-27T12:00:00Z', now), '3 days ago');
   assert.equal(UI.timeAgo('not a date', now), '');
+  // Rounding never overfills a unit: 59.6 minutes is an hour, not "60 minutes ago".
+  const ago = (seconds) => UI.timeAgo(new Date(now - seconds * 1000).toISOString(), now);
+  assert.deepEqual([59.4 * 60, 59.6 * 60, 13 * 3600, 23.6 * 3600, 6.6 * 86400, 29 * 86400].map(ago),
+    ['59 minutes ago', '1 hour ago', '13 hours ago', 'yesterday', 'last week', '4 weeks ago']);
 });
 
 test('the TV latest-PRs line lists the newest few, escaped, with their gain', () => {
@@ -90,6 +105,8 @@ test('bodyweight boards rank the ratio for athletes who shared a bodyweight', ()
   assert.match(podium, /1\.50× BW/);
   assert.match(podium, /data-id="Ada"[^]*fresh/, 'a fresh bench PR also marks the bench ratio');
   assert.match(String(BoardView.section('bw-total', ctx([athlete('Bo', { bench: 150 })]))), /Share your bodyweight in My PRs/);
+  // The total keeps its plain frame in both rankings.
+  for (const id of ['total', 'bw-total']) assert.match(String(BoardView.section(id, ctx(athletes))), /class="leaderboard-section leaderboard-total"/, id);
 });
 test('bodyweight exercises multiply by bodyweight, and the run keeps its own board', () => {
   const athletes = [athlete('Ada', { bodyweight: 60, lifts: { pullups: 15, deadhang: 120 } }), athlete('Bo', { bodyweight: 100, lifts: { pullups: 10, deadhang: 60 } })];

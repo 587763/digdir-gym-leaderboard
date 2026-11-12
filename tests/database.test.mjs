@@ -4,11 +4,11 @@ import { PGlite } from '@electric-sql/pglite';
 import { read, environment } from './helpers.mjs';
 
 let db;
-const ids = Object.fromEntries(['admin','member','peer','pending','blocked','missing','deputy','newcomer','reviewer'].map((key,i)=>[key,`00000000-0000-4000-8000-${String(i+1).padStart(12,'0')}`]));
+const ids = Object.fromEntries(['admin','member','peer','pending','blocked','missing','deputy','newcomer','reviewer','waiting'].map((key,i)=>[key,`00000000-0000-4000-8000-${String(i+1).padStart(12,'0')}`]));
 const governance='supabase/migrations/0005_governance_hardening.sql', safeguards='supabase/migrations/0006_member_safeguards.sql',
   archiving='supabase/migrations/0007_archive_athletes.sql', bodyweights='supabase/migrations/0008_bodyweight.sql',
   curls='supabase/migrations/0009_strict_curl.sql', planner='supabase/migrations/0010_planner.sql',
-  fridays='supabase/migrations/0011_friday_joins.sql';
+  fridays='supabase/migrations/0011_friday_joins.sql', hardening='supabase/migrations/0012_hardening.sql';
 let athletes, freshCatalog;
 async function as(user) {
   await db.exec('reset role');
@@ -56,7 +56,7 @@ async function database() {
   await pg.exec(read('supabase/schema.sql'));
   return pg;
 }
-// Columns, constraints, indexes, triggers, policies and functions, to detect schema drift.
+// Columns, constraints, indexes, triggers, policies, functions and row-level security switches, to detect schema drift.
 async function catalog(pg) {
   return (await pg.query(`
     select 'column' as kind, table_name::text||'.'||column_name as name, concat_ws(' ',data_type,is_nullable,column_default) as def from information_schema.columns where table_schema='public'
@@ -65,12 +65,13 @@ async function catalog(pg) {
     union all select 'trigger', tgrelid::regclass::text||'.'||tgname, pg_get_triggerdef(oid) from pg_trigger where not tgisinternal
     union all select 'policy', tablename||'.'||policyname, concat_ws(' ',permissive,cmd,roles::text,qual,with_check) from pg_policies where schemaname='public'
     union all select 'function', oid::regprocedure::text, pg_get_functiondef(oid) from pg_proc where pronamespace='public'::regnamespace
+    union all select 'rls', relname::text, relrowsecurity::text from pg_class where relnamespace='public'::regnamespace and relkind='r'
     order by 1,2`)).rows;
 }
 const fresh=()=>freshCatalog??=database().then(async(pg)=>{try{return await catalog(pg);}finally{await pg.close();}});
 before(async()=>{
   db = await database();
-  for(const file of [governance,governance,safeguards,safeguards,archiving,archiving,bodyweights,bodyweights,curls,curls,planner,planner,fridays,fridays]) await db.exec(read(file));
+  for(const file of [governance,governance,safeguards,safeguards,archiving,archiving,bodyweights,bodyweights,curls,curls,planner,planner,fridays,fridays,hardening,hardening]) await db.exec(read(file));
   await db.exec('grant usage on schema public,auth to authenticated,anon; grant select,insert,update,delete on all tables in schema public to authenticated; grant select on all tables in schema public to anon;');
   for(const [name,id] of Object.entries(ids)) {
     if(name==='missing') continue;
@@ -190,6 +191,32 @@ test('members join the Friday lift at their own time; others cannot see or forge
   assert.deepEqual((await joins()).map((j)=>j.user_id),[ids.peer]);
   await db.exec('reset role'); await db.query('delete from friday_joins');
 });
+test('someone who lost their spot can still leave what they joined',async()=>{
+  const friday=`(${nextFriday}::timestamptz + interval '15 hours')`;
+  await as('member'); const id=await savePlan("now() + interval '1 day'",'Squat');
+  await as('peer'); await joinPlan(id); await joinFriday(nextFriday,true,friday);
+  await db.exec('reset role');
+  await db.query("update profiles set status='pending',athlete_id=null where user_id=$1",[ids.peer]);
+  await as('peer');
+  await assert.rejects(()=>joinPlan(id),/claim your spot/);
+  await assert.rejects(()=>joinFriday(nextFriday,true,friday),/claim your spot/);
+  await joinPlan(id,false); await joinFriday(nextFriday,false,'null');
+  assert.deepEqual(await stored('select (select count(*)::int from plan_joins) as plans,(select count(*)::int from friday_joins) as fridays'),[{plans:0,fridays:0}]);
+  await db.query("update profiles set status='active',athlete_id=$1 where user_id=$2",[athletes[1].id,ids.peer]);
+  await as('member'); await deletePlan(id);
+});
+test('the last Friday the planner shows can be joined, also while the database is a day behind',async()=>{
+  // The planner's ninth week ends 56 to 62 days from the coming Friday's week; the app allows 60
+  // local days, and the database (in UTC, so up to a day behind) allows one more.
+  const last=`(${nextFriday} + 56)`;
+  const ahead=(await stored(`select (${last} - current_date)::int as days`))[0].days;
+  await as('member');
+  if(ahead<=61) { await joinFriday(last,true,`(${last}::timestamptz + interval '15 hours')`); await joinFriday(last,false,'null'); }
+  else await assert.rejects(()=>joinFriday(last,true,`(${last}::timestamptz + interval '15 hours')`),/60 days/);
+  const body=(await stored("select prosrc from pg_proc where proname='join_friday'"))[0].prosrc;
+  assert.match(body,/p_day > current_date \+ 61/);
+  assert.match(body,/p_day < current_date - 1/);
+});
 test('plans are checked like the planner form, and a session closes two hours after it starts',async()=>{
   await as('member');
   await assert.rejects(()=>savePlan("now() - interval '3 hours'"),/has passed/);
@@ -204,9 +231,17 @@ test('plans are checked like the planner form, and a session closes two hours af
   await as('peer');
   await assert.rejects(()=>joinPlan(now,true),/over/);
   await joinPlan(now,false);
+  // A session that is over stays where it was: moving it would take the people who came along.
+  await as('member');
+  await assert.rejects(()=>savePlan("now() + interval '1 day'",'Moved',null,now),/session is over/);
   // At most 20 upcoming plans each.
   await db.exec('reset role');
   await db.query("insert into plans(owner,starts_at,activity) select $1,now() + make_interval(days => n),'Filler' from generate_series(1,20) n",[ids.member]);
+  await as('member');
+  await assert.rejects(()=>savePlan("now() + interval '30 days'",'One more'),/20 upcoming/);
+  // Sessions still open count too, so starting them just now is no way around the limit.
+  await db.exec('reset role');
+  await db.query("update plans set starts_at=now() - interval '1 hour' where owner=$1 and activity='Filler'",[ids.member]);
   await as('member');
   await assert.rejects(()=>savePlan("now() + interval '30 days'",'One more'),/20 upcoming/);
   // A deleted account takes its plans and joins with it.
@@ -216,14 +251,50 @@ test('plans are checked like the planner form, and a session closes two hours af
   await db.query('delete from plans');
   assert.equal((await db.query('select count(*)::int as n from plan_joins')).rows[0].n,0);
 });
-test('signup without metadata succeeds and cannot bootstrap an admin',async()=>{
+test('only GitHub vouches for a login, and its bootstrap admin applies once',async()=>{
   await db.exec('reset role');
-  const id='00000000-0000-4000-8000-000000000010';
-  await db.query('insert into auth.users(id) values($1)',[id]);
-  assert.equal((await db.query('select is_admin from profiles where user_id=$1',[id])).rows[0].is_admin,false);
-  const spoof='00000000-0000-4000-8000-000000000011';
-  await db.query('insert into auth.users(id,raw_user_meta_data,raw_app_meta_data) values($1,$2,$3)',[spoof,{user_name:'587763'},{provider:'email'}]);
-  assert.equal((await db.query('select is_admin from profiles where user_id=$1',[spoof])).rows[0].is_admin,false);
+  const signUp=async(n,meta,app)=>{
+    const id=`00000000-0000-4000-8000-0000000001${n}`;
+    await db.query('insert into auth.users(id,raw_user_meta_data,raw_app_meta_data) values($1,$2,$3)',[id,meta,app]);
+    return (await db.query('select github_login,display_name,is_admin,status from profiles where user_id=$1',[id])).rows[0];
+  };
+  const nameless={github_login:null,display_name:null,is_admin:false,status:'pending'};
+  assert.deepEqual(await signUp(10,{},{}),nameless);
+  // An email sign-up sends whatever its caller typed: it borrows no colleague's login, and no admin's.
+  assert.deepEqual(await signUp(11,{user_name:'peer',full_name:'A Colleague'},{provider:'email'}),nameless);
+  assert.deepEqual(await signUp(12,{user_name:'587763'},{provider:'email'}),nameless);
+  assert.deepEqual(await signUp(13,{preferred_username:'octo',full_name:'Octo Cat'},{provider:'github'}),
+    {github_login:'octo',display_name:'Octo Cat',is_admin:false,status:'pending'});
+  // The maintainer's login makes the first admin only; a later account by that name waits like anyone.
+  assert.deepEqual(await signUp(14,{user_name:'587763'},{provider:'github'}),
+    {github_login:'587763',display_name:'587763',is_admin:false,status:'pending'});
+});
+test('an account keeps at most 30 requests waiting',async()=>{
+  await as('waiting');
+  const made=[];
+  for(let i=0;i<30;i++) made.push(await propose('new_athlete',null,{name:`Spam ${i}`}));
+  await assert.rejects(()=>propose('new_athlete',null,{name:'Spam 30'}),/30 requests waiting/);
+  assert.equal(await propose('new_athlete',null,{name:'Spam 0'}),made[0],'a retry of a waiting request is still answered');
+  await withdraw(made[0]);
+  await propose('new_athlete',null,{name:'Room again'});
+  await db.exec('reset role');
+  await db.query('delete from proposals where proposer=$1',[ids.waiting]);
+});
+test('members cannot promote themselves, write requests directly or decide what needs an admin',async()=>{
+  await as('member');
+  assert.equal((await db.query('update profiles set is_admin=true where user_id=$1 returning user_id',[ids.member])).rows.length,0);
+  await assert.rejects(()=>db.query("insert into profiles(user_id,is_admin,status) values($1,true,'active')",[ids.missing]),/row-level security/);
+  assert.equal((await db.query('delete from profiles where user_id=$1 returning user_id',[ids.peer])).rows.length,0);
+  await assert.rejects(()=>db.query("insert into proposals(kind,approval,athlete_id,proposer,status) values('pr','peer',$1,$2,'approved')",[athletes[0].id,ids.member]),/row-level security/);
+  const rename=await propose('rename',athletes[0].id,{name:'Renamed'}), pr=await propose('pr',athletes[0].id,{lift:'plank',value:7});
+  assert.equal((await db.query("update proposals set status='approved' where id=$1 returning id",[pr])).rows.length,0);
+  assert.equal((await db.query('delete from proposals where id=$1 returning id',[pr])).rows.length,0);
+  // A peer verifies PRs, never what needs an admin; accounts without a spot and blocked ones decide nothing.
+  await as('peer'); await assert.rejects(()=>decide(rename),/only an admin/);
+  await as('waiting'); await assert.rejects(()=>decide(pr),/different active member/);
+  await as('blocked'); await assert.rejects(()=>decide(pr),/blocked/);
+  assert.deepEqual((await stored('select status from proposals where id = any($1)',[[rename,pr]])).map((row)=>row.status),['pending','pending']);
+  await as('member'); await withdraw(rename); await withdraw(pr);
 });
 test('unlinked and blocked users cannot exploit NULL authorization checks',async()=>{
   await as('pending');
@@ -610,10 +681,11 @@ test('blocked admins lose direct database privileges',async()=>{
 test('fresh schema and migration use identical governance functions',()=>{
   const extract=(sql,name)=>{const start=sql.indexOf(`create or replace function public.${name}(`);assert.ok(start>=0,name);return sql.slice(start,sql.indexOf('$$;',start)+3);};
   // Each function is compared with the migration that last defines it.
-  for(const [file,names] of [[governance,['handle_new_user','is_admin']],
+  for(const [file,names] of [[governance,['is_admin']],
     [safeguards,['validate_athlete_values','protect_last_admin']],
-    [archiving,['propose','decide','withdraw','restore_my_athlete']],[bodyweights,['set_my_bodyweight']],[curls,['lift_allows_decimals']],
-    [planner,['can_plan','save_plan','delete_plan','join_plan']],[fridays,['join_friday']]]) {
+    [archiving,['withdraw','restore_my_athlete']],[bodyweights,['set_my_bodyweight']],[curls,['lift_allows_decimals']],
+    [planner,['can_plan','delete_plan']],
+    [hardening,['handle_new_user','propose','decide','save_plan','join_plan','join_friday']]]) {
     for(const name of names) assert.equal(extract(read('supabase/schema.sql'),name),extract(read(file),name),`${file}: ${name}`);
   }
 });
@@ -694,7 +766,7 @@ test('upgrading 0007 to 0008 preserves rows and matches the fresh schema',async(
   await as('member'); await setBodyweight(80);
   assert.equal(Number((await stored('select bodyweight from athletes where id=$1',[athletes[0].id]))[0].bodyweight),80);
 });
-test('upgrading 0008 to 0009 gives strict curls one decimal and matches the fresh schema',async()=>{
+test('upgrading 0008 to 0009 gives strict curls one decimal and preserves rows',async()=>{
   // Continues from the 0008 database the previous test upgraded: curls are whole numbers there.
   await as('member');
   await assert.rejects(()=>propose('pr',athletes[0].id,{lift:'strictcurl',value:42.5}),/whole numbers/);
@@ -703,7 +775,6 @@ test('upgrading 0008 to 0009 gives strict curls one decimal and matches the fres
   await db.exec(read(curls));
   await db.exec(read(curls));
   assert.deepEqual(await allRows(),before);
-  assert.deepEqual(await catalog(db),await fresh());
   await as('member');
   await assert.rejects(()=>propose('pr',athletes[0].id,{lift:'strictcurl',value:42.55}),/one decimal/);
   await withdraw(await propose('pr',athletes[0].id,{lift:'strictcurl',value:42.5}));
@@ -718,7 +789,6 @@ test('upgrading 0009 to 0010 adds the planner, preserves rows and matches the fr
   await db.exec(read(planner));
   await db.exec(read(planner));
   assert.deepEqual(await allRows(),before);
-  // The next test applies 0011 and compares the whole schema with a fresh install.
   assert.deepEqual((await db.query("select tablename from pg_publication_tables where pubname='supabase_realtime' and tablename like 'plan%' order by 1")).rows.map((r)=>r.tablename),['plan_joins','plans']);
   // Supabase grants new tables to its API roles by default; RLS decides what they may do.
   await db.exec('grant select,insert,update,delete on plans,plan_joins to authenticated; grant select on plans,plan_joins to anon;');
@@ -727,17 +797,36 @@ test('upgrading 0009 to 0010 adds the planner, preserves rows and matches the fr
   await as('peer'); await joinPlan(id);
   assert.equal(await visiblePlans(),1);
 });
-test('upgrading 0010 to 0011 adds Friday joins, preserves rows and matches the fresh schema',async()=>{
+test('upgrading 0010 to 0011 adds Friday joins and preserves rows',async()=>{
   // Continues from the 0010 database the previous test upgraded, without Friday joins.
   await db.exec('reset role');
   const before=await allRows();
   await db.exec(read(fridays));
   await db.exec(read(fridays));
   assert.deepEqual(await allRows(),before);
-  assert.deepEqual(await catalog(db),await fresh());
   assert.ok((await db.query("select 1 from pg_publication_tables where pubname='supabase_realtime' and tablename='friday_joins'")).rows.length);
   await db.exec('grant select,insert,update,delete on friday_joins to authenticated; grant select on friday_joins to anon;');
   await as('member'); await joinFriday(nextFriday,true,`(${nextFriday}::timestamptz + interval '15 hours')`);
   await as('peer');
   assert.equal((await db.query('select count(*)::int as n from friday_joins')).rows[0].n,1);
+});
+test('upgrading 0011 to 0012 hardens the functions, rewrites no rows and matches the fresh schema',async()=>{
+  // Continues from the 0011 database the previous tests upgraded step by step, so every function
+  // is still as the earlier migrations left it.
+  await db.exec('reset role');
+  const body=async(name)=>(await db.query('select prosrc from pg_proc where proname=$1',[name])).rows[0].prosrc;
+  assert.doesNotMatch(await body('handle_new_user'),/first_admin/);
+  assert.doesNotMatch(await body('propose'),/30 requests/);
+  assert.doesNotMatch(await body('save_plan'),/session is over/);
+  const before=await allRows();
+  await db.exec(read(hardening));
+  await db.exec(read(hardening));
+  assert.deepEqual(await allRows(),before);
+  // The whole upgraded schema, compared with a fresh install.
+  assert.deepEqual(await catalog(db),await fresh());
+  assert.match(await body('decide'),/for no key update/);
+  // A request made before the upgrade can still be verified after it.
+  await as('member'); const pending=await propose('pr',athletes[0].id,{lift:'pullups',value:17});
+  await as('peer'); await decide(pending);
+  assert.equal((await stored('select lifts from athletes where id=$1',[athletes[0].id]))[0].lifts.pullups,17);
 });

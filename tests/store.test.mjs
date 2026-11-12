@@ -15,6 +15,12 @@ test('missing CDN library degrades into a connection message',()=>{
   assert.equal(store.configured,false);
   assert.match(store.connectionError.message,/could not load/);
 });
+test('the Content-Security-Policy allows exactly the pinned CDN script',()=>{
+  const page=read('index.html');
+  const cdn=page.match(/<script\s+src="(https:[^"]+)"\s+integrity="sha384-[^"]+"/)[1];
+  const scripts=page.match(/script-src ([^;]+);/)[1].split(' ');
+  assert.deepEqual(scripts,["'self'",cdn],'a CDN upgrade changes the script tag, its integrity hash and the policy together');
+});
 test('auth failures propagate to the UI instead of silently succeeding',async()=>{
   const error=new Error('OAuth failed');
   const store=storeWith({auth:{signInWithOAuth:async()=>({error}),signOut:async()=>({error}),getSession:async()=>({error})}});
@@ -37,6 +43,29 @@ test('admin edits compare the opening timestamp and report concurrent changes',a
   const store=storeWith({from:()=>query});
   await assert.rejects(()=>store.adminUpdateAthlete('athlete',{name:'New'},'2026-01-01'),/changed or your access expired/);
   assert.deepEqual(filters,[['id','athlete'],['updated_at','2026-01-01']]);
+});
+test('an admin write that touched no row says so in plain words',async()=>{
+  const query={update(){return this;},delete(){return this;},eq(){return this;},select(){return this;},single:async()=>({error:{code:'PGRST116',message:'JSON object requested, multiple (or no) rows returned'}})};
+  const store=storeWith({from:()=>query});
+  for(const write of [()=>store.adminSetArchived('a',true),()=>store.adminDeleteAthlete('a'),()=>store.adminUpdateProfile('u',{is_admin:true})]) {
+    await assert.rejects(write,/That changed or your access expired\. Reload and try again\./);
+  }
+});
+test('sign-in remembers the view to come back to, once',async()=>{
+  const kept=new Map();
+  const context=environment([]);
+  context.LEADERBOARD_CONFIG={SUPABASE_URL:'https://example.supabase.co',SUPABASE_ANON_KEY:'public-key'};
+  context.supabase={createClient:()=>({auth:{signInWithOAuth:async()=>({error:null})}})};
+  context.sessionStorage={getItem:(key)=>kept.get(key)??null,setItem:(key,value)=>kept.set(key,value),removeItem:(key)=>kept.delete(key)};
+  Object.assign(context.location,{search:'?tv&tabs=lifts',hash:'#total'});
+  vm.runInContext(read('js/store.js'),context);
+  await context.Store.signIn();
+  assert.equal(context.Store.takeReturnView(),'?tv&tabs=lifts#total');
+  assert.equal(context.Store.takeReturnView(),'');
+  // Without session storage sign-in still works, and there is no view to return to.
+  const plain=storeWith({auth:{signInWithOAuth:async()=>({error:null})}});
+  await plain.signIn();
+  assert.equal(plain.takeReturnView(),'');
 });
 test('bodyweight is saved through its RPC and failures propagate',async()=>{
   const calls=[];
