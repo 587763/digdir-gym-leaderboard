@@ -132,8 +132,7 @@ Equal decimal totals share the same rank. TV rotation pauses while a dialog is o
 For an existing database, apply the numbered files in
 [`supabase/migrations/`](supabase/migrations/) in order (the Supabase SQL Editor, or
 `supabase db query --linked -f <file>`) before deploying the frontend that needs them (the
-live database has everything through `0011_friday_joins.sql`; `0012_hardening.sql` tightens
-function bodies only and is still to be applied). They preserve existing data. For a
+live database has everything through `0012_hardening.sql`). They preserve existing data. For a
 fresh installation, use `supabase/schema.sql` instead; that file resets the tables.
 
 ## Backups
